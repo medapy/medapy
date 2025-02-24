@@ -1,0 +1,14 @@
+site_name: MeDaPy Docs
+
+theme:
+  name: "material"
+
+plugins:
+  - mkdocstrings
+
+nav:
+  - Home: index.md
+  - Tutorials: tutorials.md
+  - Examples: examples.md
+  - Reference: reference.md
+  - explanation.md

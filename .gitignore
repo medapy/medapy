@@ -10,6 +10,9 @@ superconductivity/
 decide_later/
 tests/
 
+# Docs site
+site/
+
 # Internal TODO/notes
 _internal_todo.md
 
