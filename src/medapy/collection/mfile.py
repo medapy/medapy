@@ -237,7 +237,7 @@ class MeasurementFile:
         """Check if file contains specified contact configuration"""
 
         # Convert single pair/contact to list
-        if not isinstance(contacts, (list, tuple)):
+        if not isinstance(contacts, list):
             contacts = [contacts]
 
         # Check if all specified contacts/pairs are present

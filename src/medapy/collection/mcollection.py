@@ -111,7 +111,8 @@ class MeasurementCollection:
     def filter_generator(self,
                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
                polarization: str | None = None,
-               sweep_direction: str | None = None,
+               sweeps: list[str] | str | None = None,
+               sweep_directions: list[str | None] | str | None = None,
                **parameter_filters) -> Iterator[MeasurementFile]:
         """
         Filter measurement files based on various criteria, returning a generator
@@ -127,9 +128,10 @@ class MeasurementCollection:
         """
         for meas_file in self.files:
             if meas_file.check(
-                contacts,
-                polarization,
-                sweep_direction,
+                contacts=contacts,
+                polarization=polarization,
+                sweeps=sweeps,
+                sweep_directions=sweep_directions,
                 **parameter_filters
             ):
                 yield meas_file
@@ -137,7 +139,8 @@ class MeasurementCollection:
     def filter(self,
                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
                polarization: str | None = None,
-               sweep_direction: str | None = None,
+               sweeps: list[str] | str | None = None,
+               sweep_directions: list[str | None] | str | None = None,
                **parameter_filters) -> 'MeasurementCollection':
         """
         Filter measurement files based on various criteria, returning a new collection
@@ -152,9 +155,10 @@ class MeasurementCollection:
             New MeasurementCollection containing only matching files
         """
         filtered_files = list(self.filter_generator(
-            contacts,
-            polarization,
-            sweep_direction,
+            contacts=contacts,
+            polarization=polarization,
+            sweeps=sweeps,
+            sweep_directions=sweep_directions,
             **parameter_filters
         ))
         return MeasurementCollection(

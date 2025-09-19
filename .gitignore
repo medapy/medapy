@@ -13,8 +13,19 @@ tests/
 # Internal TODO/notes
 _internal_todo.md
 
+# Local environment
+# Virtual environment
+.venv/
+
+# Implementation scratches
+scratch/
+
 # Packages installed in environment
 recs.txt
+requirements.txt
 
-# Local project config
+# Language server project config
 pyrightconfig.json
+
+# Claude Code files
+CLAUDE.md
