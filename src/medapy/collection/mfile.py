@@ -27,12 +27,12 @@ class PolarizationType(Enum):
                 return cls.CURRENT
             elif value in cls.__aliases_voltage:
                 return cls.VOLTAGE
-    
+
     def __eq__(self, other):
         if isinstance(other, str):
             other = self._missing_(other)
         return super().__eq__(other)
-    
+
     def __hash__(self):
         return super().__hash__()
 
@@ -51,7 +51,7 @@ class ContactPair:
                           second_contact=self.second_contact,
                           polarization=self.polarization,
                           magnitude=self.magnitude)
-        
+
     def __str__(self) -> str:
         result = f"{self.first_contact}"
         if self.second_contact is not None:
@@ -69,13 +69,13 @@ class ContactPair:
                                                         fmt='.2g' if 0.01 <= self.magnitude <= 100 else '.1e',
                                                         unit=unit)
         return result
-    
+
     def __post_init__(self):
         if isinstance(self.polarization, str):
             self.polarization = PolarizationType(self.polarization)
         if isinstance(self.magnitude, (str, int, float)):
             self.magnitude = Decimal(str(self.magnitude))
-    
+
     def parse_contacts(self, text: str) -> bool:
         m = contact_pattern.match(text)
         if not m:
@@ -86,23 +86,23 @@ class ContactPair:
         self.polarization = PolarizationType(type_str)
         self.magnitude = self._convert_magntude(magnitude) if magnitude else None
         return True
-    
+
     def pair_matches(self, pair: Iterable[int] | int | 'ContactPair') -> bool:
         if isinstance(pair, int):
-            return (self.first_contact == pair and 
+            return (self.first_contact == pair and
                     self.second_contact is None)
         elif isinstance(pair, ContactPair):
             return self == pair
-        return (self.first_contact == pair[0] and 
+        return (self.first_contact == pair[0] and
                 self.second_contact == pair[1])
-    
+
     def to_tuple(self):
         return (self.first_contact, self.second_contact,
                 self.polarization, self.magnitude)
-    
+
     def copy(self):
         return self.__copy__()
-    
+
     def polarized(self, polarization, magnitude=None):
         return type(self)(self.first_contact,
                           self.second_contact,
@@ -120,7 +120,7 @@ class ContactPair:
                        .replace('G', 'e9')
                        .replace('T', 'e12')
                        .rstrip('AV'))
-    
+
     def __hash__(self):
         return hash((self.first_contact, self.second_contact, self.polarization, self.magnitude))
 
@@ -131,7 +131,7 @@ class MeasurementFile:
     contact_pairs: list[ContactPair]
     separator: str = "_"
 
-    def __init__(self, 
+    def __init__(self,
                  path: str | Path,
                  parameters: list[ParameterDefinition | Parameter] | Path | str,
                  separator: str = "_"):
@@ -167,14 +167,14 @@ class MeasurementFile:
                 for param in parameters:
                     name = param.name_id
                     self.param_definitions[name] = param
-                    
+
         self.parameters = dict()
         self._parse_filename()
 
     @property
     def name(self) -> str:
         return self.path.name
-    
+
     def check(self,
               contacts: tuple[int, int] | list[tuple[int, int] | int] | int | None = None,
               polarization: str | None = None,
@@ -182,7 +182,7 @@ class MeasurementFile:
               sweep_directions: list[str | None] | str | None = None,
               **parameter_filters: dict) -> bool:
         """Check if file matches all filter conditions"""
-                
+
         # Check contacts
         if contacts is not None:
             if not self.check_contacts(contacts):
@@ -202,12 +202,12 @@ class MeasurementFile:
         for param_name, filter_value in parameter_filters.items():
             if not self.check_parameter(param_name, filter_value):
                 return False
-            
+
         return True
 
     def check_polarization(self, polarization: str):
         return any(pair.polarization == polarization for pair in self.contact_pairs)
-    
+
     def check_sweeps(self, sweeps: list[str] | str, directions: list[str | None] | str | None = None):
         if not isinstance(sweeps, (list, tuple)):
             sweeps = [sweeps]
@@ -217,21 +217,21 @@ class MeasurementFile:
             raise ValueError(f"Number of sweeps ({len(sweeps)}) is smaller "
                              f"than number of directions ({len(directions)})")
         sweeps_and_dirs = zip_longest(sweeps, directions)
-        
+
         return all(self.check_sweep(*sweep) for sweep in sweeps_and_dirs)
-    
+
     def check_sweep(self, sweep: str | None, direction: str | None = None):
         param = self.parameters.get(sweep)
         if not param:
             return False
-        
+
         is_swept = param.state.is_swept
         if not direction:
             return is_swept
-        
+
         is_correct_direction = param.state.sweep_direction == direction
         return is_swept and is_correct_direction
-            
+
     def check_contacts(self,
                        contacts: tuple[int, int] | list[tuple[int, int] | int] | int) -> bool:
         """Check if file contains specified contact configuration"""
@@ -242,7 +242,7 @@ class MeasurementFile:
 
         # Check if all specified contacts/pairs are present
         return all(
-            any(pair.pair_matches(check_pair) 
+            any(pair.pair_matches(check_pair)
                 for pair in self.contact_pairs)
             for check_pair in contacts
         )
@@ -271,22 +271,22 @@ class MeasurementFile:
                              f"got {len(value)} for {name}")
         if param.state.is_swept:
             # For swept parameter, check if sweep range overlaps with filter range
-            return (param.state.min_val <= max_val and 
+            return (param.state.min_val <= max_val and
                    param.state.max_val >= min_val)
 
         # For fixed parameter, check if value is within range
         return min_val <= param.state.value <= max_val
-    
+
     def get_parameter(self, name: str) -> Parameter:
         param = self.parameters.get(name)
         if not param:
             raise ValueError(f'{name} parameter is not defined for file {self.path.name}')
         return param
-    
+
     def state_of(self, name: str) -> ParameterState:
         param = self.get_parameter(name)
         return ParameterState.from_state(param.state)
-    
+
     def _parse_filename(self) -> None:
         # Get filename without extension
         name = self.path.stem
@@ -323,7 +323,7 @@ class MeasurementFile:
                 except KeyError:
                     self.parameters[param_name] = param
                 continue
-    
+
     def merge(self,
               other: 'MeasurementFile',
               strict_mode: bool = False,
@@ -349,13 +349,13 @@ class MeasurementFile:
                     # Check if parameters are equal
                     if (param.state != other_param.state):
                         raise ValueError(f"Parameter '{param_name}' differs between files in strict mode")
-                
+
         # Merge parameters (self take precedence in case of conflict)
         merged_parameters = {}
         merged_parameters.update(other.parameters)
         merged_parameters.update(self.parameters)
         parameters_list = [param for param in merged_parameters.values()]
-        
+
         # Merge contact pairs (removing duplicates)
         merged_contacts = []
         seen_contacts = set()
@@ -382,11 +382,11 @@ class MeasurementFile:
             separator=self.separator
         )
         merged_file.contact_pairs = merged_contacts
-        
+
         merged_filename = merged_file.generate_filename()
         merged_file.path = merged_file.path.parent / merged_filename
         return merged_file
-    
+
     def rename(self,
                directory: str | Path | None = None,
                name: str | Path | None = None,
@@ -398,12 +398,12 @@ class MeasurementFile:
         # Change separator
         if sep:
             self.separator = sep
-        
+
         # Generate new path
         self.path = self._generate_path(directory=directory, name=name,
                                         prefix=prefix, postfix=postfix,
                                         sep=sep, ext=ext)
-    
+
     def _generate_path(self,
                        directory: str | Path | None = None,
                        name: str | Path | None = None,
@@ -415,32 +415,32 @@ class MeasurementFile:
         if not directory:
             directory = self.path.parent
         directory = Path(directory).expanduser()
-        
+
         if not name:
             name = self.path.stem
-        
+
         if sep:
             name = name.replace(self.separator, sep)
             self.separator = sep
-            
+
         if prefix:
             name = self.separator.join([prefix, name])
-            
+
         if postfix:
             name = self.separator.join([name, postfix])
-            
+
         if ext and not ext.startswith('.'):
             ext = f".{ext}"
         elif ext is None:
             ext = self.path.suffix
         else:
             ext = ''
-        
+
         return directory / f"{name}{ext}"
-    
+
     def copy(self):
         return self.__copy__()
-        
+
     def __copy__(self):
         new = type(self)(
             path=self.path,
@@ -448,7 +448,7 @@ class MeasurementFile:
             separator=self.separator)
         new.contact_pairs = [pair.copy() for pair in self.contact_pairs]
         return new
-            
+
     def generate_filename(self,
                           prefix: str = None,
                           postfix: str = None,
@@ -485,9 +485,9 @@ class MeasurementFile:
         for param in self.parameters.values():
             if not param.state.is_swept:
                 parameters_ordered.append(param)
-        
+
         param_parts = []
-        # Build the parameter part of the filename       
+        # Build the parameter part of the filename
         for param in parameters_ordered:
             param_parts.append(str(param))
 

@@ -34,7 +34,7 @@ def r2rho(r: npt.ArrayLike, kind: str, t: float, width: float = None, length: fl
         Resistivity values
     """
     kind = misc._validate_option(kind, ['xx', 'xy'], 'kind')
-    r = np.asarray_chkfinite(r)    
+    r = np.asarray_chkfinite(r)
 
     if kind == 'xx':
         if width is None or length is None:
@@ -58,7 +58,7 @@ def gen_mr2bnd_eq(bands):
         numerator = n1*mu1 + n2*mu2 + (n1*mu2 + n2*mu1)*(mu1*mu2*H**2)
         denominator = (n1*mu1 + n2*mu2)**2 + ((sign1*n1 + sign2*n2)*(mu1*mu2*H))**2
         return np.divide(numerator, denominator)/e
-    return xx  
+    return xx
 
 def generate_twoband_eq(kind, bands):
     assert (kind in ('xx', 'xy'))
@@ -69,11 +69,11 @@ def generate_twoband_eq(kind, bands):
         case 'xy':
             return gen_hall2bnd_eq(bands)
 
-def fit_twoband(field: np.ndarray, 
-                rho: np.ndarray, 
-                p0: tuple[float, float, float, float], 
-                *, 
-                kind: str, 
+def fit_twoband(field: np.ndarray,
+                rho: np.ndarray,
+                p0: tuple[float, float, float, float],
+                *,
+                kind: str,
                 bands: str,
                 bounds: Optional[Union[dict, tuple[Optional[npt.ArrayLike], Optional[npt.ArrayLike]]]] = None,
                 extension: Optional[Union[tuple, np.ndarray]] = None,
@@ -147,7 +147,7 @@ def fit_twoband(field: np.ndarray,
 
     # Create parameters
     params = _create_twoband_fit_parameters(p0, bounds, fix_params)
-    
+
     # Prepare sigma values
     sigmas = _prepare_twoband_fit_sigma(sigma, rho.size, rho_ext.size)
     if sigmas is not None:
@@ -168,10 +168,10 @@ def fit_twoband(field: np.ndarray,
                 print(report_text, file=f)
         else: # TextIO
             print(report_text, file=report)
-        
+
     # Extract and rescale final parameters
     p = res.params
-    return _rescale_twoband_params(p['n1'].value, p['n2'].value, 
+    return _rescale_twoband_params(p['n1'].value, p['n2'].value,
                                  p['mu1'].value, p['mu2'].value)
 
 # Protected methods
@@ -193,8 +193,8 @@ def _rescale_twoband_params(n1: float, n2: float, mu1: float, mu2: float) -> tup
     """Convert parameters from log scale back to linear scale."""
     return (10**n1, 10**n2, 10**mu1, 10**mu2)
 
-    
-def _create_twoband_fit_parameters(p0: npt.ArrayLike, 
+
+def _create_twoband_fit_parameters(p0: npt.ArrayLike,
                      bounds: Optional[Union[dict, tuple[Optional[npt.ArrayLike], Optional[npt.ArrayLike]]]] = None,
                      fix_params: Optional[Union[dict, npt.ArrayLike]] = None) -> lmfit.Parameters:
     """Create and configure lmfit Parameters object."""
@@ -262,8 +262,8 @@ def _prepare_twoband_fit_extension(extention: Optional[Union[tuple, np.ndarray]]
 
     return np.asarray_chkfinite(field_ext), np.asarray_chkfinite(rho_ext)
 
-def _prepare_twoband_fit_sigma(sigma: Optional[Union[float, npt.ArrayLike]], 
-                 rho_size: int, 
+def _prepare_twoband_fit_sigma(sigma: Optional[Union[float, npt.ArrayLike]],
+                 rho_size: int,
                  rho_ext_size: int) -> Optional[np.ndarray]:
     """Prepare sigma values for fitting."""
     if sigma is None:

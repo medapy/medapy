@@ -12,7 +12,7 @@ df = pd.DataFrame({'Field (Oe)': [5, 3, 1, 0, -1, -3, -5],
                     'Resistivity (Ohm*cm)': [0.2575, 0.1225, 0.055, 0.025, 0.045, 0.1275, 0.2425],
                     })
 
-custom_unit_dict = dict(Ohm='ohm') 
+custom_unit_dict = dict(Ohm='ohm')
 df.ms.init_msheet(translations=custom_unit_dict, patch_rename=True)
 
 # Add labels

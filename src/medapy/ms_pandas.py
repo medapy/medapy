@@ -32,7 +32,7 @@ def update_column_names(func):
 
         # Rename column names in axes, labels and units
         df_ms._update_column_maps(columns)
-                    
+
         return None if kwargs.get('inplace', False) else res
     return wrapper
 
@@ -44,10 +44,10 @@ class MeasurementSheetAccessor:
     DEFAULT_UNIT_FORMAT = '~ms'
     MAIN_AXES = ('x', 'y', 'z')
     DIMENSIONLESS_UNIT = '1'
-    
+
     def __init__(self, pandas_obj):
         self._obj = pandas_obj
-        
+
         # Initialize attributes with default values if not present in instance
         if '_ms_labels' not in self._obj.attrs:
             self._obj.attrs['_ms_labels'] = {}
@@ -62,7 +62,7 @@ class MeasurementSheetAccessor:
             self._obj.attrs['_ms_unit_brackets'] = self.DEFAULT_UNIT_BRACKETS
         if '_ms_translations' not in self._obj.attrs:
             self._obj.attrs['_ms_translations'] = self.DEFAULT_TRANSLATIONS
-    
+
     def __getitem__(self, key: str | list[str]) -> pd.Series | pd.DataFrame:
         """Get column(s) by label(s) or column name(s) using square bracket notation."""
         # Multiple keys
@@ -73,7 +73,7 @@ class MeasurementSheetAccessor:
             other_obj.ms.reset_axes()
             other_obj.ms._clear_unused()
             return other_obj
-        
+
         # Single key
         column = self._labels.get(key, key)
         self._validate_columns_in_df(column)
@@ -84,12 +84,12 @@ class MeasurementSheetAccessor:
         else:
             new_name = column
         return pd.Series(self._obj[column].to_numpy(), name=new_name)
-    
+
     def __setitem__(self, key: str, value) -> None:
         """Set column(s) by label(s) or column name(s) using square bracket notation."""
         # Single key only yet
         column = self._labels.get(key, key)
-        
+
         # Validate length match
         column_len = self._obj.shape[0]
         try:
@@ -99,7 +99,7 @@ class MeasurementSheetAccessor:
         if column_len != value_len:
             raise ValueError(f"Length of values ({value_len}) does not match "
                              f"length of measurement sheet ({column_len})")
-        
+
         # Accept pint arrays
         if isinstance(value, pd.Series) and hasattr(value.dtype, 'units'):
             unit = value.dtype.units
@@ -113,11 +113,11 @@ class MeasurementSheetAccessor:
             self._obj[column] = value.pint.magnitude
             self.set_unit(column, unit)
             return
-        
+
         self._obj[column] = value
         if column not in self.units:
             self.set_unit(column, '')
-        
+
     def __getattr__(self, name: str) -> pd.Series:
         """Dynamic getter for axes."""
         # Only called if attribute is not found through normal lookup
@@ -125,7 +125,7 @@ class MeasurementSheetAccessor:
             column = self._axes[name]
             return self._obj[column]
         raise AttributeError(f"'{name}' axis is not set")
-    
+
     def __setattr__(self, name, value):
         """Prevent setting axes values manually"""
         # Ensure _obj attribute is set correctly
@@ -136,10 +136,10 @@ class MeasurementSheetAccessor:
         if name in self._axes:
             # If name is in _axes, raise error
             raise AttributeError(f"Cannot set value to axis '{name}'")
-            
+
         # For non-_axes attributes, use default behavior
         super().__setattr__(name, value)
-    
+
     def __str__(self):
         index = ['U', 'A', 'L']
         data = dict()
@@ -147,34 +147,34 @@ class MeasurementSheetAccessor:
             unit = self.get_unit(column) or ''
             axis = self.is_axis(column) or '-'
             labels = self.get_labels(column) or '-'
-            
+
             unit =  self._wrap_unit_in_brackets(unit)
             labels= ', '.join(labels)
-            
+
             data[column] = [unit, axis, labels]
-            
+
         df_ms = pd.DataFrame(data, index=index)
         df_display = pd.concat(objs=[df_ms, self._obj])
-        return df_display.__repr__()  
-      
+        return df_display.__repr__()
+
     def __repr__(self):
         # Get repr parameters used by pandas
         repr_params = pd.io.formats.format.get_dataframe_repr_params()
         # remove keys unexpected by DataFrameFormatter
         line_width = repr_params.pop('line_width')
-        max_colwidth = repr_params.pop('max_colwidth') 
+        max_colwidth = repr_params.pop('max_colwidth')
 
         from pandas import option_context
-        
+
         with option_context("display.max_colwidth", max_colwidth):
             formatter = DataFrameFormatter(frame=self._obj, **repr_params)
             string_formatter = StringFormatter(formatter, line_width=line_width)
-            
+
             # Get original formatted output
             original = string_formatter._get_strcols()
             # Get columns from output and their column number
             columns = [(i, col[0].strip()) for i, col in enumerate(original)]
-            
+
             # Modify data columns
             for i, column in columns[1:]:
                 if column == '...':
@@ -185,29 +185,29 @@ class MeasurementSheetAccessor:
                     unit =  self._wrap_unit_in_brackets(self.get_unit(column))
                     axis = self.is_axis(column) or '-'
                     labels = self.get_labels(column) or '-'
-                    
+
                 col_width = len(original[i][0])
                 unit_fmt = f"{unit:>{col_width}}"
                 axis_fmt = f"{axis:>{col_width}}"
                 labels_fmt = f"{' ,'.join(labels):>{col_width}}"
                 original[i][1:1] = [unit_fmt, axis_fmt, labels_fmt]
-            
+
             # Modify index column
             idx_width = len(original[0][-1])
             original[0][1:1] = [f"{name:<{idx_width}}" for name in ('U', 'A', 'L')]
-                
+
             # return string_formatter._join_multiline(original)
             return string_formatter.adj.adjoin(1, *original)
-    
+
     @property
     def _units(self) -> dict[str, str]:
         """Access to units -> column mapping"""
         return self._obj.attrs['_ms_units']
-    
+
     @_units.setter
     def _labels(self, value: dict[str, str]) -> None:
         self._obj.attrs['_ms_units'] = value
-    
+
     @property
     def _labels(self) -> dict[str, str]:
         """Access to label -> column mapping"""
@@ -252,22 +252,22 @@ class MeasurementSheetAccessor:
     @_translations.setter
     def _translations(self, value: dict[str, str]) -> None:
         self._obj.attrs['_ms_translations'] = value
-    
+
     @property
     def axes(self) -> dict[str, str]:
         """Get all axis assignments."""
         return self._axes.copy()
-    
+
     @property
     def units(self) -> dict[str, str]:
         """Get all axis assignments."""
         return self._units.copy()
-    
+
     @property
     def labels(self) -> dict[str, str]:
         """Get all label mappings."""
         return self._labels.copy()
-    
+
     # MeasurementSheet methods
     def init_msheet(
         self,
@@ -309,8 +309,8 @@ class MeasurementSheetAccessor:
             remove case sensivity when parsing (case_sensitive=False)
         registry_contexts : str or list[str], optional
             One or several pint registry contexts used to convert units.
-            For example, context 'Gaussian' is required to convert 
-            between 'tesla' and 'oersted'. Names of available contexts 
+            For example, context 'Gaussian' is required to convert
+            between 'tesla' and 'oersted'. Names of available contexts
             can be found inside pint package file `pint/default_en.txt`
         strict_units : bool, default True
             If overwriting units when assigning to existing columns is forbidden
@@ -319,36 +319,36 @@ class MeasurementSheetAccessor:
         if registry_params:
             ureg = pint.UnitRegistry(**registry_params)
             pint.set_application_registry(ureg)
-        
+
         if registry_contexts:
             if isinstance(registry_contexts, str):
                 registry_contexts = [registry_contexts]
             ureg.enable_contexts(*registry_contexts)
-        
+
         if patch_rename:
             self._obj.rename = self._patched_rename
-        
+
         self._strict_units = strict_units
-        
+
         # Set unit translations
         self.set_unit_translations(translations)
-        
+
         # Set unit pattern for current sheet
         self.set_unit_pattern(unit_pattern)
-        
+
         # Set brackets to wrap the units
         self.set_unit_brackets(brackets)
-        
+
         # Set format when convert units to strings
         self.set_unit_format(format_spec)
-        
+
         # Set default axes
         self.reset_axes()
-        
+
         # Infer and set units if required
         if units:
             self.infer_ms_units()
-        
+
     def save_msheet(
             self,
             output: str | Path,
@@ -405,7 +405,7 @@ class MeasurementSheetAccessor:
             formatter = {self.get_column(col): fmt for col, fmt in formatter.items()}
         # if header is True:
         #     header = [self._append_unit_to_column(col, brackets, unit_format) for col in columns]
-        
+
         try:
             if formatter is not None:
                 self._format_df_inplace(df, formatter)
@@ -446,15 +446,15 @@ class MeasurementSheetAccessor:
                     f"number of columns ({len(columns)})"
                 )
             formatter = dict(zip(columns, formatter))
-            
+
         self._format_df_inplace(self._obj, formatter)
-    
+
     def clear_msheet(self, restore_names: bool = False) -> None:
         """Clear both labels and axis assignments."""
         self.clear_labels()
         self.clear_axes()
         self.clear_units(restore_names)
-    
+
     def infer_ms_units(self,
                        pattern: str | Pattern | None = None,
                        priority: str | None = None,
@@ -462,7 +462,7 @@ class MeasurementSheetAccessor:
                        ) -> None:
         """
         Infer units from column names and convert to pint dtype.
-        
+
         Parameters
         ----------
         pattern : str or Pattern, optional
@@ -478,7 +478,7 @@ class MeasurementSheetAccessor:
         """
         for col in self._obj.columns:
             self.infer_unit(col, pattern=pattern, priority=priority, translations=translations)
-    
+
     def convert_ms_units(self, to_units: list[str | pint.Unit]) -> None:
         """Convert msheet data to different units at once."""
         columns = self._obj.columns
@@ -488,15 +488,15 @@ class MeasurementSheetAccessor:
                 f"to number of columns ({len(columns)})")
         for (col, unit) in zip(columns, to_units):
             self.convert_unit(col, unit)
-    
+
     def get_ms_state(self) -> dict:
         """Get MSheet state as dict"""
         return self._get_ms_state_of_df(self._obj)
-    
+
     def set_ms_state(self, attrs) -> None:
         """Set MSheet state from dict"""
         self._obj.attrs.update(attrs)
-    
+
     # Unit methods
     def infer_unit(self, column: str,
                    pattern: str | Pattern = None,
@@ -528,7 +528,7 @@ class MeasurementSheetAccessor:
         existing_unit = self.get_unit(column)
         parsed_unit = self.parse_unit(column, pattern)
         new_col = self.strip_unit(column, pattern) if parsed_unit is not None else column
-        
+
         # Translate custom unit name to pint-compatible. If None, returns None
         parsed_unit = self._translate_unit(parsed_unit, translations)
         # No unit in column name (None) - set dimensionless
@@ -546,12 +546,12 @@ class MeasurementSheetAccessor:
         if parsed_unit == existing_unit:
             self.rename(columns={column: new_col})
             return
-        
+
         # Unit conflict: give priority to unit over dimensionless
         if parsed_unit == self.DIMENSIONLESS_UNIT:
             self.rename(columns={column: new_col})
             return
-        
+
         # Handle unit conflict
         compatible = ureg.is_compatible_with(parsed_unit, existing_unit)
         if priority is None:
@@ -576,13 +576,13 @@ class MeasurementSheetAccessor:
                 f"{'compatible' if compatible else 'not compatible'}"
             )
             warnings.warn(message, UnitOverwriteWarning)
-      
+
         self.rename(columns={column: new_col})
-    
+
     def get_unit(self, column: str) -> str | None:
         """
         Get unit from a column.
-        
+
         Returns:
         - str if column has unit
         - None if no unit found
@@ -591,7 +591,7 @@ class MeasurementSheetAccessor:
 
         unit = self._units.get(column)
         return unit
-    
+
     def set_unit(self, column: str, unit: Union[str, pint.Unit, None] = None) -> None:
         """
         Set unit for a column without converting values.
@@ -605,17 +605,17 @@ class MeasurementSheetAccessor:
             Unit to set. None and '' set unit to dimensionless
         """
         column = self.get_column(column)
-        
+
         # Set new unit without conversion
         # If unit = None, make dimensionless
         unit = '' if unit is None else unit
         unit = self._validate_unit(unit)
         unit_str = str(unit)
-            
+
         if unit_str in ('', 'dimensionless', '1'):
             unit_str = self.DIMENSIONLESS_UNIT
         self._units[column] = unit_str
-    
+
     def convert_unit(self,
                      column: str,
                      to_unit: Union[str, pint.Unit],
@@ -626,7 +626,7 @@ class MeasurementSheetAccessor:
         unit = self.get_unit(column)
         unit = ureg(unit)
         to_unit = self._validate_unit(to_unit)
-        
+
         if contexts:
             if isinstance(contexts, str):
                 contexts = [contexts]
@@ -634,10 +634,10 @@ class MeasurementSheetAccessor:
                 coef = unit.to(to_unit).m # magnitude of pint.Quantity
         else:
             coef = unit.to(to_unit).m # magnitude of pint.Quantity
-            
+
         self._obj[column] *= coef
         self.set_unit(column, to_unit)
-    
+
     def parse_unit(self, column: str, pattern: Optional[Union[str, Pattern]] = None) -> Optional[str]:
         """
         Parse unit from column name using regex pattern.
@@ -672,7 +672,7 @@ class MeasurementSheetAccessor:
             return self.DIMENSIONLESS_UNIT
 
         return unit_str
-    
+
     def strip_unit(self, column: str, pattern: Optional[Union[str, Pattern]] = None) -> str:
         """
         Remove unit part from column name.
@@ -705,7 +705,7 @@ class MeasurementSheetAccessor:
         if match:
             return column.replace(match.group(1), '').strip()
         return column
-    
+
     def restore_unit(self, column: str,
                     brackets: Optional[str] = None,
                     format_spec: Optional[str] = None) -> None:
@@ -724,7 +724,7 @@ class MeasurementSheetAccessor:
         new_col = self._append_unit_to_column(column, brackets, format_spec)
         self.rename(columns={column: new_col})
         return new_col
-    
+
     def clear_units(self, restore_names: bool = False) -> None:
         """Clear all column units."""
         for col in self._obj.columns:
@@ -732,18 +732,18 @@ class MeasurementSheetAccessor:
                 new_col = self.restore_unit(col)
                 self.set_unit(new_col, None)
                 continue
-            self.set_unit(col, None)    
-    
+            self.set_unit(col, None)
+
     def wu(self, name: str) -> pd.Series:
         """Get column values as series with pint unit"""
         if 'sys' not in sys.modules:
             raise RuntimeError("Required module 'pint_pandas' is not loaded")
-        
+
         column = self.get_column(name)
         series = self._obj[column]
         unit = self.get_unit(column)
         return pd.Series(series, dtype=f'pint[{unit}]')
-    
+
     # Label methods
     def get_column(self, name: str) -> str:
         """Get original column name from either label or column name.
@@ -763,16 +763,16 @@ class MeasurementSheetAccessor:
             return name
         else:
             raise KeyError(f"'{name}' is neither a label nor a column")
-    
+
     def rename(self, columns: dict[str, str]) -> None:
         self._obj.rename(columns=columns, inplace=True)
         self._update_column_maps(columns)
-    
+
     def add_labels(self, labels: dict[str, str]) -> None:
         invalid_cols = set(labels.keys()) - set(self._obj.columns)
         if invalid_cols:
             raise ValueError(f"Invalid column names: {', '.join(invalid_cols)}")
-        
+
         labels_dict = dict()
         for column, label in labels.items():
             if not isinstance(label, str):
@@ -780,13 +780,13 @@ class MeasurementSheetAccessor:
                     labels_dict[lbl] = column
             else:
                 labels_dict[label] = column
-            
+
         invalid_labels = self._get_nonuniques_with_counts(self._obj.columns, labels_dict)
         if invalid_labels:
             raise ValueError(f"Labels conflict with existing columns: {', '.join(invalid_labels)}")
-        
+
         self._labels.update(labels_dict)
-      
+
     def add_label(self, column: str, label: str) -> None:
         """Add a label for a column."""
         if label in self._obj.columns:
@@ -794,7 +794,7 @@ class MeasurementSheetAccessor:
         if column not in self._obj.columns:
             raise ValueError(f"Column '{column}' does not exist")
         self._labels[label] = column
-        
+
     def rename_label(self, old: str, new: str) -> None:
         """Rename a label while preserving its column mapping.
 
@@ -823,12 +823,12 @@ class MeasurementSheetAccessor:
         if label not in self._labels:
             raise KeyError(f"Label '{label}' not found")
         self._labels.pop(label, None)
-    
+
     def get_labels(self, column: str) -> tuple[str]:
         """Get all labels assigned to column"""
         return tuple(lbl for lbl, col in self._labels.items() if col == column)
 
-    
+
     def clear_labels(self) -> None:
         """Clear all label mappings."""
         self._labels.clear()
@@ -841,8 +841,8 @@ class MeasurementSheetAccessor:
         if len(columns) > 1:
             self._axes['y'] = columns[1]
         if len(columns) > 2:
-            self._axes['z'] = columns[2] 
-    
+            self._axes['z'] = columns[2]
+
     def is_axis(self, name: str) -> str | None:
         """Check if column or label is assigned to any axis.
 
@@ -855,12 +855,12 @@ class MeasurementSheetAccessor:
         # Resolve column name if a label was passed
         column = self.get_column(name)
 
-        return next((axis for axis, col in self._axes.items() 
+        return next((axis for axis, col in self._axes.items()
                     if col == column), None)
-    
+
     def set_as_axis(self, name: Union[str, None], axis: str, swap: bool = False) -> None:
         """Set column as a named axis or remove axis assignment if name is None.
-        
+
         Args:
             name: Column name, label, or None to remove assignment
             axis: Name of the axis ('x', 'y', 'z', etc.)
@@ -877,10 +877,10 @@ class MeasurementSheetAccessor:
 
         # Check if column is already assigned to another axis
         existing_axis = self.is_axis(column)
-        
+
         if existing_axis == axis:
             return
-        
+
         if existing_axis:
             if swap:
                 # Swap axis assignments
@@ -894,19 +894,19 @@ class MeasurementSheetAccessor:
                 self._axes.pop(existing_axis)
 
         self._axes[axis] = column
-    
+
     def set_as_x(self, column: Union[str, None], swap: bool = False) -> None:
         """Set column as x axis"""
         self.set_as_axis(column, 'x', swap)
-        
+
     def set_as_y(self, column: Union[str, None], swap: bool = False) -> None:
         """Set column as y axis"""
         self.set_as_axis(column, 'y', swap)
-    
+
     def set_as_z(self, column: Union[str, None], swap: bool = False) -> None:
         """Set column as z axis"""
         self.set_as_axis(column, 'z', swap)
-    
+
     def remove_axis(self, axis: str) -> None:
         """Remove an axis assignment."""
         if axis not in self._axes:
@@ -915,19 +915,19 @@ class MeasurementSheetAccessor:
             self._axes[axis] = None
         else:
             self._axes.pop(axis)
-    
+
     def remove_x(self) -> None:
         """Remove x axis assignment."""
         self.remove_axis('x')
-    
+
     def remove_y(self) -> None:
         """Remove y axis assignment."""
         self.remove_axis('y')
-    
+
     def remove_z(self) -> None:
         """Remove z axis assignment."""
         self.remove_axis('z')
-    
+
     def clear_axes(self) -> None:
         """Clear all axis assignments."""
         self._axes.clear()
@@ -951,17 +951,17 @@ class MeasurementSheetAccessor:
                     obj.ms._clear_unused()
                 except Exception as e:
                     raise Exception(e)
-        
+
         all_columns = [self._obj.columns.tolist()]
         all_labels = [self.labels]
         all_units = [self.units]
         for obj in objs:
             columns = obj.columns.tolist()
             all_columns.append(columns)
-            
+
             labels = obj.attrs.get('_ms_labels', {})
             all_labels.append(labels)
-            
+
             units = obj.attrs.get('_ms_units', {})
             if not units:
                 units = {col: self.DIMENSIONLESS_UNIT for col in columns}
@@ -971,12 +971,12 @@ class MeasurementSheetAccessor:
         if columns_overlap:
             raise ValueError("Column names of concatenating objects have duplicates "
                              f"(name: times): {str(columns_overlap)[1:-1]}")
-        
+
         labels_overlap = self._get_nonuniques_with_counts(*map(dict.keys, all_labels))
         if labels_overlap:
             raise ValueError("Labels of concatenating objects have duplicates "
                              f"(name: times): {str(labels_overlap)[1:-1]}")
-        
+
         df = pd.concat(objs=[self._obj, *objs], axis='columns')
         ms_state = self.get_ms_state()
         self._set_ms_state_to_df(df, ms_state)
@@ -984,14 +984,14 @@ class MeasurementSheetAccessor:
         for d in all_labels:
             merged_labels.update(d)
         df.attrs['_ms_labels'] = merged_labels.copy()
-        
+
         merged_units = dict()
         for d in all_units:
             merged_units.update(d)
         df.attrs['_ms_units'] = merged_units
-        
+
         return df
-    
+
     # Unit customization methods
     def set_unit_translations(self, translations: Optional[dict[str, str]] = None) -> None:
         """
@@ -1006,14 +1006,14 @@ class MeasurementSheetAccessor:
         if translations is None:
             self._translations = self.DEFAULT_TRANSLATIONS
             return
-        
+
         self._validate_translations(translations)
         self._translations = translations.copy()
-        
+
     def set_unit_brackets(self, brackets: Optional[str]) -> None:
         """
         Set global unit brackets
-        
+
         Parameters
         ----------
         brackets : str, optional
@@ -1050,11 +1050,11 @@ class MeasurementSheetAccessor:
 
         self._validate_format_spec(format_spec)
         ureg.formatter.default_format = format_spec
-    
+
     def set_unit_pattern(self, pattern: Optional[Union[str, Pattern]] = None) -> None:
         """
         Set default unit pattern for current measurement sheet.
-        
+
         Parameters
         ----------
         pattern : str or Pattern, optional
@@ -1064,12 +1064,12 @@ class MeasurementSheetAccessor:
             self._unit_pattern = self._compile_pattern(pattern)
         else:
             self._unit_pattern = self.DEFAULT_UNIT_PATTERN
-    
+
     # Protected methods
     def _set_column_states(self, columns, values=None, units=None, axes=None, labels=None) -> None:
         """
         Set values and metadata for a dataframe columns.
-        Helper method to use with other accessors 
+        Helper method to use with other accessors
 
         Parameters
         ----------
@@ -1093,7 +1093,7 @@ class MeasurementSheetAccessor:
         Only performs operations for non-None parameters.
         """
         n_cols = len(columns)
-        
+
         # Set default lists if None
         if values is None:
             values = [None] * n_cols
@@ -1103,14 +1103,14 @@ class MeasurementSheetAccessor:
             axes = [None] * n_cols
         if labels is None:
             labels = [None] * n_cols
-            
+
         for (col, val, unt, axs, lbl) in zip(columns, values, units, axes, labels):
             self._set_column_state(column=col, values=val, unit=unt, axis=axs, label=lbl)
-    
+
     def _set_column_state(self, column, values=None, unit=None, axis=None, label=None) -> None:
         """
         Set values and metadata for a dataframe column.
-        Helper method to use with other accessors 
+        Helper method to use with other accessors
 
         Parameters
         ----------
@@ -1145,13 +1145,13 @@ class MeasurementSheetAccessor:
 
         if label is not None:
             self.add_labels({column: label})
-    
+
     def _get_nonuniques_with_counts(self, *sequences):
         items = [item for seq in sequences for item in seq]
         counts = Counter(items)
         duplicates = {item: count for item, count in counts.items() if count > 1}
         return duplicates
-        
+
     def _make_empty_replica_len(self, **kwargs) -> pd.DataFrame:
         empty_df = pd.DataFrame(**kwargs)
         attrs = self.get_ms_state()
@@ -1159,7 +1159,7 @@ class MeasurementSheetAccessor:
             attrs.pop(attr)
         self._set_ms_state_to_df(empty_df, attrs)
         return empty_df
-    
+
     def _translate_unit(self,
                         unit: Optional[str],
                         translations: Optional[dict[str, str]] = None) -> Optional[str]:
@@ -1175,7 +1175,7 @@ class MeasurementSheetAccessor:
         for u_incorrect, u_correct in all_translations.items():
             unit = unit.replace(u_incorrect, u_correct)
         return unit
-    
+
     def _compile_pattern(self, pattern: Union[str, Pattern]) -> Pattern:
         """
         Compile pattern if it's a string, otherwise return as is.
@@ -1205,7 +1205,7 @@ class MeasurementSheetAccessor:
             except re.error as e:
                 raise ValueError(f"Invalid regular expression pattern: {e}")
         raise TypeError(f"Pattern must be string or compiled regex, got {type(pattern)}")
-            
+
     def _append_unit_to_column(self, column: str,
                     brackets: Optional[str] = None,
                     format_spec: Optional[str] = None) -> str:
@@ -1231,7 +1231,7 @@ class MeasurementSheetAccessor:
             left, right = brackets
         else:
             left, right = self._unit_brackets
-            
+
         if format_spec is not None:
             self._validate_format_spec(format_spec)
             use_format = format_spec
@@ -1240,10 +1240,10 @@ class MeasurementSheetAccessor:
         unit = self._validate_unit(unit)
         formatted_unit = format(unit, use_format)
         return f'{left}{formatted_unit}{right}'
-    
+
     def _update_column_maps(self, columns: dict[str, str]) -> None:
         """Remap axes, labels, and units when columns change names"""
-        # Use dict copies (self.units, self.labels, self.axes) 
+        # Use dict copies (self.units, self.labels, self.axes)
         # to avoid changing keys during iteration
         for old_name, new_name in columns.items():
             # Update axes dictionary (unique mapping)
@@ -1256,26 +1256,26 @@ class MeasurementSheetAccessor:
             for label, col in self.labels.items():
                 if col == old_name:
                     self._obj.attrs['_ms_labels'][label] = new_name
-                    
+
             # Update units dictionary (unique mapping)
             for col in self.units:
                 if col == old_name:
                     self._obj.attrs['_ms_units'][new_name] = self._obj.attrs['_ms_units'].pop(old_name)
-    
+
     def _clear_unused(self) -> None:
         """Clear axes, labels and units for columns that are not in df"""
         for axis, column in self.axes.items():
             if column not in self._obj.columns:
                 self.remove_axis(axis)
-        
+
         for label, column in self.labels.items():
             if column not in self._obj.columns:
                 self.remove_label(label)
-        
+
         for column, unit in self.units.items():
             if column not in self._obj.columns:
                 self._units.pop(column)
-    
+
     @staticmethod
     def _get_ms_state_of_df(df: pd.DataFrame) -> dict:
         attrs = dict()
@@ -1284,14 +1284,14 @@ class MeasurementSheetAccessor:
             if isinstance(key, str) and key.startswith('_ms_'):
                 attrs[key] = value
         return attrs
-    
+
     @staticmethod
     def _set_ms_state_to_df(df: pd.DataFrame, attrs: dict) -> None:
         for key in attrs:
             if not (isinstance(key, str) and key.startswith('_ms_')):
                 raise ValueError(f"Unsupported key {key}")
         df.attrs.update(attrs)
-    
+
     @staticmethod
     def _format_df_inplace(df: pd.DataFrame, formatter: dict[str, str]) -> None:
         """Format DataFrame columns in-place using provided formatters.
@@ -1315,12 +1315,12 @@ class MeasurementSheetAccessor:
         """
         invalid_cols = set(formatter) - set(df.columns)
         if invalid_cols:
-            raise ValueError(f"Invalid column names in formatter: {invalid_cols}")            
-    
+            raise ValueError(f"Invalid column names in formatter: {invalid_cols}")
+
         # Handle columns with units
         for col, fmt in formatter.items():
             df[col] = df[col].map(fmt.format)
-    
+
     @update_column_names
     def _patched_rename(self, *args, **kwargs):
         """Handle column rename events"""
@@ -1341,7 +1341,7 @@ class MeasurementSheetAccessor:
         ValueError
             If any target unit is not recognized by pint
         """
-        
+
         invalid_units = []
         for source, target in translations.items():
             try:
@@ -1354,7 +1354,7 @@ class MeasurementSheetAccessor:
             raise ValueError(
                 f"Following translations contain invalid target units: {units_str}"
             )
-    
+
     def _validate_brackets(self, brackets: str) -> None:
         """
         Validate that string contains exactly one valid pair of brackets.
@@ -1396,7 +1396,7 @@ class MeasurementSheetAccessor:
             raise ValueError(
                 f"Mismatched brackets: '{left}{right}'. Expected '{left}{valid_pairs[left]}'"
             )
-    
+
     def _validate_format_spec(self, format_spec: str) -> None:
         """
         Validate that format specification is compatible with pint.
@@ -1419,7 +1419,7 @@ class MeasurementSheetAccessor:
             raise ValueError(
                 f"Invalid format specification '{format_spec}'. Error: {e}"
             )
-    
+
     def _validate_columns_in_df(self, columns: str | list[str]):
         """Validate all columns exist"""
         # Check single column
@@ -1427,12 +1427,12 @@ class MeasurementSheetAccessor:
             if columns not in self._obj.columns:
                 raise KeyError(f"'{columns}' is neither a valid column nor a label")
             return
-        
+
         invalid = [col for col in columns if col not in self._obj.columns]
         if invalid:
             raise KeyError("Following names are neither valid columns nor labels: "
                            f"{', '.join(invalid)}")
-            
+
     def _validate_unit(self, unit: str) -> pint.Unit:
         """Validate the unit is defined in pint registry"""
         if isinstance(unit, pint.Unit):

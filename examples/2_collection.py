@@ -9,7 +9,7 @@ def print_files(fs, n, header=None, end=None):
     if header:
         print(header)
         print('-'*len(header))
-    
+
     if isinstance(fs, MeasurementCollection):
         fs_len = len(fs)
         fs.head(n)
@@ -17,14 +17,14 @@ def print_files(fs, n, header=None, end=None):
         for (i, f) in enumerate(fs):
             if i < n:
                 print(f'{i:2}: {f.path.name}')
-            
+
         fs_len = i + 1
     print(f'Total number of elements: {fs_len}')
     if end:
         print('-'*len(end))
         print(end)
     print()
-    
+
 # Create parameter definitions inside code
 # example:
 #   long_names: [name1, name2]
@@ -34,7 +34,7 @@ def print_files(fs, n, header=None, end=None):
 #     value_name1: value1
 #     value_name2: value
 #   patterns:
-#     fixed: "{SNAME}--{VALUE}{UNIT}" 
+#     fixed: "{SNAME}--{VALUE}{UNIT}"
 #     sweep: "{LNAME}sweep|sweep{LNAME}"
 #     range: "{NAME}{VALUE}to{VALUE}{UNIT}"
 
@@ -76,7 +76,7 @@ testcopy.rename(directory='~', name='newname',
 print(testcopy.path)
 
 # Merge two files
-# If strict mode, checks that parameters of files are equal 
+# If strict mode, checks that parameters of files are equal
 merged = testfile.merge(testfile2, strict_mode=True)
 print(merged.path)
 
@@ -89,7 +89,7 @@ print(merged.path)
 f = merged.generate_filename(prefix='sample', postfix='merged')
 print(f)
 
-# Print states of parameters parsed from testname 
+# Print states of parameters parsed from testname
 print(*list(map(repr, testfile.parameters.values())), sep='\n', end='\n\n')
 
 # Load default parameter definitions
@@ -184,7 +184,7 @@ print_files(files_1uA, n=5, header='Contact pair 1-5, I=1uA')
 files_specific = collection.filter_generator(
     contacts=[pair, (3, 7)],
     polarization='current',
-    sweep_direction='inc', 
+    sweep_direction='inc',
     temperature=(2, 10),
     position=[45, 'IP'],
 )

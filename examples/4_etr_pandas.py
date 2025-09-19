@@ -13,7 +13,7 @@ df = pd.DataFrame({'Field (Oe)': [5, 3, 1, 0, -1, -3, -5],
                     'Resistance (Ohm)': [10300,  4900,  2200, 1000,  1800,  5100,  9700],
                     })
 
-custom_unit_dict = dict(Ohm='ohm') 
+custom_unit_dict = dict(Ohm='ohm')
 df.ms.init_msheet(translations=custom_unit_dict, patch_rename=True)
 
 # Add labels
@@ -37,7 +37,7 @@ print('\nMSheet forced to monotonic increasing:')
 print(df.ms)
 
 # In addition, etr allows:
-# Convert resistance to resistivity 
+# Convert resistance to resistivity
 t = 50 * ureg('nm') # set geometric parameters
 w = 10 * ureg('cm')
 l = 2 * ureg('cm')
