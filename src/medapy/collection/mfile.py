@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from itertools import zip_longest
 import re
+import warnings
 from enum import Enum
 from pathlib import Path
 from decimal import Decimal
@@ -180,6 +181,8 @@ class MeasurementFile:
               polarization: str | None = None,
               sweeps: list[str] | str | None = None,
               sweep_directions: list[str | None] | str | None = None,
+              exact_sweep: bool = True,
+              name_contains: list[str] | str | None = None,
               **parameter_filters: dict) -> bool:
         """Check if file matches all filter conditions"""
 
@@ -198,15 +201,53 @@ class MeasurementFile:
             if not self.check_sweeps(sweeps, sweep_directions):
                 return False
 
+        # Check name contains
+        if name_contains is not None:
+            if not self.check_name(name_contains):
+                return False
+
         # Check parameter filters
         for param_name, filter_value in parameter_filters.items():
-            if not self.check_parameter(param_name, filter_value):
-                return False
+            if param_name.endswith('_sweep'):
+                # Handle sweep parameter filtering
+                base_name = param_name[:-6]  # Remove '_sweep' suffix
+                if not self.check_parameter(base_name, filter_value, swept=True, exact_sweep=exact_sweep):
+                    return False
+            else:
+                # Handle fixed parameter filtering
+                if not self.check_parameter(param_name, filter_value, swept=False, exact_sweep=exact_sweep):
+                    return False
 
         return True
 
     def check_polarization(self, polarization: str):
         return any(pair.polarization == polarization for pair in self.contact_pairs)
+
+    def check_name(self, strings: list[str] | str) -> bool:
+        """Check if filename contains specified string(s) or matches regex pattern(s)"""
+        if not isinstance(strings, (list, tuple)):
+            strings = [strings]
+
+        filename = self.name
+
+        for pattern in strings:
+            try:
+                if re.search(pattern, filename):
+                    continue
+                else:
+                    return False
+            except re.error as e:
+                warnings.warn(
+                    f"Invalid regex pattern '{pattern}': {e}. "
+                    f"Falling back to substring matching.",
+                    UserWarning
+                )
+                if pattern in filename:
+                    continue
+                else:
+                    return False
+
+        return True
 
     def check_sweeps(self, sweeps: list[str] | str, directions: list[str | None] | str | None = None):
         if not isinstance(sweeps, (list, tuple)):
@@ -249,33 +290,69 @@ class MeasurementFile:
 
     def check_parameter(self,
                         name: str,
-                        value) -> bool:
+                        value: list[float, float] | float,
+                        swept: bool | None = None,
+                        exact_sweep: bool = True) -> bool:
         """Check if parameter matches value or range"""
         param = self.parameters.get(name)
         if not param:
             return False
 
-        # Handle exact value
-        if not isinstance(value, Iterable):
-            if param.state.is_swept:
+        if swept is not None:
+            # Filter by swept state if specified
+            if swept and not param.state.is_swept:
                 return False
-            return param.state.value == param._value2decimal(str(value))
+            if not swept and param.state.is_swept:
+                return False
 
-        # Handle range
+        # Delegate to appropriate implementation
+        if param.state.is_swept:
+            return self._check_sweep_parameter(name, value, exact_sweep)
+        else:
+            return self._check_fixed_parameter(name, value)
+
+    def _parse_parameter_range(self, name: str, value: list[float, float]) -> tuple:
+        """Protected: Parse and validate parameter range"""
+        param = self.parameters.get(name)
         try:
             min_val, max_val = map(param._value2decimal, value)
             if min_val > max_val:
                 min_val, max_val = max_val, min_val
+            return min_val, max_val
         except ValueError:
             raise ValueError("Param range length should be 2; "
                              f"got {len(value)} for {name}")
-        if param.state.is_swept:
-            # For swept parameter, check if sweep range overlaps with filter range
-            return (param.state.min_val <= max_val and
-                   param.state.max_val >= min_val)
 
-        # For fixed parameter, check if value is within range
+    def _check_fixed_parameter(self, name: str, value: list[float, float] | float) -> bool:
+        """Protected: Handle fixed parameter logic"""
+        param = self.parameters.get(name)
+
+        # Handle exact value
+        if not isinstance(value, Iterable):
+            return param.state.value == param._value2decimal(str(value))
+
+        # Handle range - for fixed parameter, check if value is within range
+        min_val, max_val = self._parse_parameter_range(name, value)
         return min_val <= param.state.value <= max_val
+
+    def _check_sweep_parameter(self, name: str, value: list[float, float] | float, exact_sweep: bool = True) -> bool:
+        """Protected: Handle sweep parameter logic"""
+        param = self.parameters.get(name)
+
+        # Handle exact value - swept parameters can't match exact values
+        if not isinstance(value, Iterable):
+            return False
+
+        # Handle range
+        min_val, max_val = self._parse_parameter_range(name, value)
+
+        # For swept parameter, check if sweep range matches exactly or belongs to it
+        if exact_sweep:
+            return (param.state.min_val == min_val and
+                param.state.max_val == max_val)
+        else:
+            return (param.state.min_val >= min_val and
+                param.state.max_val <= max_val)
 
     def get_parameter(self, name: str) -> Parameter:
         param = self.parameters.get(name)

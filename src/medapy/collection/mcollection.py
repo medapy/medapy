@@ -113,6 +113,9 @@ class MeasurementCollection:
                polarization: str | None = None,
                sweeps: list[str] | str | None = None,
                sweep_directions: list[str | None] | str | None = None,
+               exact_sweeps: bool = True,
+               name_contains: list[str] | str | None = None,
+               exclude: bool = False,
                **parameter_filters) -> Iterator[MeasurementFile]:
         """
         Filter measurement files based on various criteria, returning a generator
@@ -120,20 +123,24 @@ class MeasurementCollection:
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
             polarization: 'I' for current or 'V' for voltage
-            sweep_direction: 'up' or 'down'
+            sweep_directions: 'inc' or 'dec'
+            exclude: If True, exclude files that match criteria instead of including them
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
             Iterator of matching MeasurementFile instances
         """
         for meas_file in self.files:
-            if meas_file.check(
+            matches = meas_file.check(
                 contacts=contacts,
                 polarization=polarization,
                 sweeps=sweeps,
                 sweep_directions=sweep_directions,
+                exact_sweep=exact_sweeps,
+                name_contains=name_contains,
                 **parameter_filters
-            ):
+            )
+            if matches != exclude:
                 yield meas_file
 
     def filter(self,
@@ -141,6 +148,9 @@ class MeasurementCollection:
                polarization: str | None = None,
                sweeps: list[str] | str | None = None,
                sweep_directions: list[str | None] | str | None = None,
+               exact_sweeps: bool = True,
+               name_contains: list[str] | str | None = None,
+               exclude: bool = False,
                **parameter_filters) -> 'MeasurementCollection':
         """
         Filter measurement files based on various criteria, returning a new collection
@@ -148,7 +158,8 @@ class MeasurementCollection:
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
             polarization: 'I' for current or 'V' for voltage
-            sweep_direction: 'up' or 'down'
+            sweep_direction: 'inc' or 'dec'
+            exclude: If True, exclude files that match criteria instead of including them
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
@@ -159,12 +170,46 @@ class MeasurementCollection:
             polarization=polarization,
             sweeps=sweeps,
             sweep_directions=sweep_directions,
+            exact_sweeps=exact_sweeps,
+            name_contains=name_contains,
+            exclude=exclude,
             **parameter_filters
         ))
         return MeasurementCollection(
             filtered_files,
             parameters=self.param_definitions.values(),
             separator=self.separator
+        )
+
+    def exclude(self,
+                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
+                polarization: str | None = None,
+                sweeps: list[str] | str | None = None,
+                sweep_directions: list[str | None] | str | None = None,
+                exact_sweeps: bool = True,
+                name_contains: list[str] | str | None = None,
+                **parameter_filters) -> 'MeasurementCollection':
+        """
+        Exclude measurement files that match the given criteria
+
+        Args:
+            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
+            polarization: 'I' for current or 'V' for voltage
+            sweep_directions: 'inc' or 'dec'
+            **parameter_filters: Parameter name with value or (min, max) tuple
+
+        Returns:
+            New MeasurementCollection excluding matching files
+        """
+        return self.filter(
+            contacts=contacts,
+            polarization=polarization,
+            sweeps=sweeps,
+            sweep_directions=sweep_directions,
+            exact_sweeps=exact_sweeps,
+            name_contains=name_contains,
+            exclude=True,
+            **parameter_filters
         )
 
     def sort(self, *parameters) -> 'MeasurementCollection':
