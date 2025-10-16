@@ -116,6 +116,7 @@ class MeasurementCollection:
                exact_sweeps: bool = True,
                name_contains: list[str] | str | None = None,
                exclude: bool = False,
+               mode: str = 'all',
                **parameter_filters) -> Iterator[MeasurementFile]:
         """
         Filter measurement files based on various criteria, returning a generator
@@ -125,6 +126,7 @@ class MeasurementCollection:
             polarization: 'I' for current or 'V' for voltage
             sweep_directions: 'inc' or 'dec'
             exclude: If True, exclude files that match criteria instead of including them
+            mode: 'all' for AND logic (default), 'any' for OR logic
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
@@ -132,6 +134,7 @@ class MeasurementCollection:
         """
         for meas_file in self.files:
             matches = meas_file.check(
+                mode=mode,
                 contacts=contacts,
                 polarization=polarization,
                 sweeps=sweeps,
@@ -154,6 +157,7 @@ class MeasurementCollection:
                **parameter_filters) -> 'MeasurementCollection':
         """
         Filter measurement files based on various criteria, returning a new collection
+        Uses AND logic - files must match ALL criteria
 
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
@@ -173,6 +177,7 @@ class MeasurementCollection:
             exact_sweeps=exact_sweeps,
             name_contains=name_contains,
             exclude=exclude,
+            mode='all',
             **parameter_filters
         ))
         return MeasurementCollection(
@@ -190,7 +195,7 @@ class MeasurementCollection:
                 name_contains: list[str] | str | None = None,
                 **parameter_filters) -> 'MeasurementCollection':
         """
-        Exclude measurement files that match the given criteria
+        Exclude measurement files that match ANY of the given criteria (OR logic)
 
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
@@ -199,9 +204,9 @@ class MeasurementCollection:
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
-            New MeasurementCollection excluding matching files
+            New MeasurementCollection excluding files that match ANY criterion
         """
-        return self.filter(
+        filtered_files = list(self.filter_generator(
             contacts=contacts,
             polarization=polarization,
             sweeps=sweeps,
@@ -209,7 +214,13 @@ class MeasurementCollection:
             exact_sweeps=exact_sweeps,
             name_contains=name_contains,
             exclude=True,
+            mode='any',
             **parameter_filters
+        ))
+        return MeasurementCollection(
+            filtered_files,
+            parameters=self.param_definitions.values(),
+            separator=self.separator
         )
 
     def sort(self, *parameters) -> 'MeasurementCollection':

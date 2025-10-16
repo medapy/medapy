@@ -177,6 +177,8 @@ class MeasurementFile:
         return self.path.name
 
     def check(self,
+              *,
+              mode: str = 'all',
               contacts: tuple[int, int] | list[tuple[int, int] | int] | int | None = None,
               polarization: str | None = None,
               sweeps: list[str] | str | None = None,
@@ -184,41 +186,52 @@ class MeasurementFile:
               exact_sweep: bool = True,
               name_contains: list[str] | str | None = None,
               **parameter_filters: dict) -> bool:
-        """Check if file matches all filter conditions"""
+        """
+        Check if file matches filter conditions with configurable logic
 
-        # Check contacts
-        if contacts is not None:
-            if not self.check_contacts(contacts):
-                return False
+        Args:
+            mode: 'all' for AND logic (default), 'any' for OR logic
+            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
+            polarization: 'I' for current or 'V' for voltage
+            sweeps: Sweep parameter(s) to match
+            sweep_directions: 'inc', 'dec', or None
+            exact_sweep: Whether to match sweep ranges exactly
+            name_contains: String(s) or regex pattern(s) that must appear in filename
+            **parameter_filters: Parameter name with value or (min, max) tuple
 
-        # Check polarization
-        if polarization is not None:
-            if not self.check_polarization(polarization):
-                return False
+        Returns:
+            bool: True if criteria match according to mode
+        """
+        def _check_generator():
+            """Lazy generator of individual check results"""
+            if contacts is not None:
+                yield self.check_contacts(contacts)
 
-        # Check sweep direction
-        if sweeps is not None:
-            if not self.check_sweeps(sweeps, sweep_directions):
-                return False
+            if polarization is not None:
+                yield self.check_polarization(polarization)
 
-        # Check name contains
-        if name_contains is not None:
-            if not self.check_name(name_contains):
-                return False
+            if sweeps is not None:
+                yield self.check_sweeps(sweeps, sweep_directions)
 
-        # Check parameter filters
-        for param_name, filter_value in parameter_filters.items():
-            if param_name.endswith('_sweep'):
-                # Handle sweep parameter filtering
-                base_name = param_name[:-6]  # Remove '_sweep' suffix
-                if not self.check_parameter(base_name, filter_value, swept=True, exact_sweep=exact_sweep):
-                    return False
-            else:
-                # Handle fixed parameter filtering
-                if not self.check_parameter(param_name, filter_value, swept=False, exact_sweep=exact_sweep):
-                    return False
+            if name_contains is not None:
+                yield self.check_name(name_contains)
 
-        return True
+            # Check parameter filters
+            for param_name, filter_value in parameter_filters.items():
+                if param_name.endswith('_sweep'):
+                    # Handle sweep parameter filtering
+                    base_name = param_name[:-6]  # Remove '_sweep' suffix
+                    yield self.check_parameter(base_name, filter_value, swept=True, exact_sweep=exact_sweep)
+                else:
+                    # Handle fixed parameter filtering
+                    yield self.check_parameter(param_name, filter_value, swept=False, exact_sweep=exact_sweep)
+
+        if mode == 'all':
+            return all(_check_generator())
+        elif mode == 'any':
+            return any(_check_generator())
+        else:
+            raise ValueError(f"mode must be 'all' or 'any', got '{mode}'")
 
     def check_polarization(self, polarization: str):
         return any(pair.polarization == polarization for pair in self.contact_pairs)
