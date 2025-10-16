@@ -195,13 +195,13 @@ class Parameter:
 
     def set_fixed(self, value: float | str):
         self.state.is_swept = False
-        self.state.value = self._value2decimal(value)
+        self.state.value = self.decimal_of(value)
         return self
 
     def set_swept(self, start_val: Decimal, end_val: Decimal):
         self.state.is_swept = True
         if start_val is not None and end_val is not None:
-            start_val, end_val = self._value2decimal(start_val), self._value2decimal(end_val)
+            start_val, end_val = self.decimal_of(start_val), self.decimal_of(end_val)
             if end_val > start_val:
                 self.state.sweep_direction = SweepDirection.INCREASING
             elif end_val < start_val:
@@ -220,7 +220,7 @@ class Parameter:
                                       self.state.sweep_direction)
         self.state.unit = other.state.unit or self.state.unit
 
-    def _value2decimal(self, value_str):
+    def decimal_of(self, value_str):
         """Convert string value to Decimal, handling special values"""
         if not isinstance(value_str, str):
             value_str = str(value_str)
