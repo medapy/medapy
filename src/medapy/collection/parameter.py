@@ -36,11 +36,12 @@ class SweepDirection(Enum):
     def __hash__(self):
         return super().__hash__()
 
+
 @dataclass
 class ParameterDefinition:
     """Immutable parameter definition that can be shared"""
     name_id: str
-    long_names: str| Iterable[str]
+    long_names: str | Iterable[str]
     short_names: str | Iterable[str] = frozenset()
     units: str | Iterable[str] = frozenset()
     special_values: MappingProxyType[str, Decimal] = field(
@@ -73,12 +74,18 @@ class ParameterDefinition:
 
     def _create_base_patterns(self) -> Dict[str, str]:
         special_values_pattern = '|'.join(map(re.escape, self.special_values.keys()))
+        # Only add special values alternative if there are any
+        if special_values_pattern:
+            value_pattern = rf'-?\d+\.?\d*(?:[eE][+-]?\d+)?|{special_values_pattern}'
+        else:
+            value_pattern = r'-?\d+\.?\d*(?:[eE][+-]?\d+)?'
+
         return {
             'LNAME': '|'.join(map(re.escape, self.long_names)),
             'SNAME': '|'.join(map(re.escape, self.short_names)),
             'NAME': '|'.join(map(re.escape, self.long_names | self.short_names)),
             'UNIT': '|'.join(map(re.escape, self.units)),
-            'VALUE': rf'-?\d+\.?\d*(?:[eE][+-]?\d+)?|{special_values_pattern}',
+            'VALUE': value_pattern,
         }
 
     def _compile_patterns(self) -> None:
@@ -87,8 +94,8 @@ class ParameterDefinition:
         # Default patterns
         default_patterns = {
             'sweep': r'sweep{NAME}|{NAME}sweep',
-            'range': r'{NAME}{VALUE}to{VALUE}{UNIT}?',
-            'fixed': r'{NAME}=?{VALUE}{UNIT}?'
+            'range': r'{NAME}{VALUE}to{VALUE}{UNIT}?$',
+            'fixed': r'{NAME}=?{VALUE}{UNIT}?$',
         }
 
         # Merge with custom patterns if provided
@@ -104,12 +111,10 @@ class ParameterDefinition:
             for placeholder, value in base.items():
                 if placeholder == 'VALUE' or placeholder == 'UNIT':
                     final_pattern = final_pattern.replace(
-                        f'{{{placeholder}}}',
-                        f'({value})')
+                        f'{{{placeholder}}}', f'({value})')
                 else:
                     final_pattern = final_pattern.replace(
-                        f'{{{placeholder}}}',
-                        f'(?:{value})')
+                        f'{{{placeholder}}}', f'(?:{value})')
 
             try:
                 compiled_patterns[pattern_name] = re.compile(final_pattern)
@@ -127,6 +132,7 @@ class ParameterDefinition:
 
     def search(self, pattern_type: str, text: str) -> re.Match | None:
         return self.get_pattern(pattern_type).search(text)
+
 
 @dataclass
 class _ParameterState:
@@ -147,6 +153,7 @@ class _ParameterState:
     def __copy__(self):
         # Method is not tested
         return type(self)(**self.__dict__.copy())
+
 
 class Parameter:
     def __init__(self, definition: ParameterDefinition, **kwargs):
@@ -196,10 +203,17 @@ class Parameter:
     def set_fixed(self, value: float | str):
         self.state.is_swept = False
         self.state.value = self.decimal_of(value)
+        # Reset sweep-related attributes
+        self.state.min_val = None
+        self.state.max_val = None
+        self.state.sweep_direction = SweepDirection.UNDEFINED
         return self
 
     def set_swept(self, start_val: Decimal, end_val: Decimal):
         self.state.is_swept = True
+        # Reset fixed-related attributes
+        self.state.value = None
+
         if start_val is not None and end_val is not None:
             start_val, end_val = self.decimal_of(start_val), self.decimal_of(end_val)
             if end_val > start_val:
@@ -209,6 +223,11 @@ class Parameter:
                 self.state.sweep_direction = SweepDirection.DECREASING
             self.state.min_val = start_val
             self.state.max_val = end_val
+        else:
+            # Undefined sweep - reset sweep values and direction
+            self.state.min_val = None
+            self.state.max_val = None
+            self.state.sweep_direction = SweepDirection.UNDEFINED
         return self
 
     def update(self, other):
@@ -216,8 +235,9 @@ class Parameter:
         self.state.is_swept = other.state.is_swept or self.state.is_swept
         self.state.min_val = other.state.min_val or self.state.min_val
         self.state.max_val = other.state.max_val or self.state.max_val
-        self.state.sweep_direction = (other.state.sweep_direction or
-                                      self.state.sweep_direction)
+        self.state.sweep_direction = (
+            other.state.sweep_direction or self.state.sweep_direction
+        )
         self.state.unit = other.state.unit or self.state.unit
 
     def decimal_of(self, value_str):
@@ -232,8 +252,7 @@ class Parameter:
         return self.__copy__()
 
     def __copy__(self):
-        return type(self)(self.definition,
-                          **self.state.__dict__.copy())
+        return type(self)(self.definition, **self.state.__dict__.copy())
 
     def __str__(self):
         if self.definition.long_names:
@@ -248,7 +267,9 @@ class Parameter:
         if self.state.is_swept:
             name = lname or sname
             s = f'sweep{name}'
-            if isinstance(self.state.min_val, Decimal) and isinstance(self.state.max_val, Decimal):
+            if isinstance(self.state.min_val, Decimal) and isinstance(
+                self.state.max_val, Decimal
+            ):
                 mn, mx = self.state.min_val, self.state.max_val
                 if self.state.sweep_direction == SweepDirection.DECREASING:
                     mx, mn = mn, mx
@@ -306,6 +327,7 @@ class DefinitionsLoader:
     def get_all(self) -> list[Parameter]:
         return [self.get_definition(name) for name in self._definitions.keys()]
 
+
 class ParameterState(NamedTuple):
     value: float | None
     is_swept: bool
@@ -326,8 +348,8 @@ class ParameterState(NamedTuple):
             min=cls.to_float(state.min_val),
             max=cls.to_float(state.max_val),
             sweep_direction=state.sweep_direction,
-            unit=state.unit
-            )
+            unit=state.unit,
+        )
 
     @property
     def range(self) -> tuple[float, float] | None:
