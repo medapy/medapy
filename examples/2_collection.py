@@ -174,9 +174,12 @@ print_files(files_V2_6, n=5, header='Contact pair 2-6')
 
 # Filter contact pair with particular polarization
 pair = ContactPair(1, 5, 'I', 1e-6) # create contact pair I1-5(1uA)
-# Alternatively it can be created by parsing a string
-# pair = ContactPair()
-# pair.parse_contacts('I1-5(1uA)')
+# Alternatively it can be created by parsing a string or tuple
+# pair = ContactPair.make_from('I1-5(1uA)')
+# pair = ContactPair.make_from((1, 5, 'I', 1e-6))
+# Integer or tuple[2] can be used to have a single contact/pair without polarization
+# pair = ContactPair.make_from(1)
+# pair = ContactPair.make_from((1, 5))
 files_1uA = collection.filter_generator(contacts=pair)
 print_files(files_1uA, n=5, header='Contact pair 1-5, I=1uA')
 

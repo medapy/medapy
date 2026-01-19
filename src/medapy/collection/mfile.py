@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from itertools import zip_longest
 import re
@@ -41,7 +42,7 @@ contact_pattern = re.compile(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ContactPair:
     # For single contact, second_contact will be None
     first_contact: int | None = None
@@ -56,6 +57,51 @@ class ContactPair:
             polarization=self.polarization,
             magnitude=self.magnitude,
         )
+
+    @classmethod
+    def make_from(cls, data: int | tuple | str | "ContactPair") -> "ContactPair":
+        """
+        Create ContactPair from various input formats.
+
+        Args:
+            data: Contact specification
+                - int: single contact (e.g., 1)
+                - tuple[2]: (first_contact, second_contact)
+                - tuple[3]: (first_contact, second_contact, polarization)
+                - tuple[4]: (first_contact, second_contact, polarization, magnitude)
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "1")
+                - ContactPair: returns as-is
+
+        Returns:
+            ContactPair instance
+
+        Raises:
+            ValueError: If invalid input type or string parsing fails
+        """
+        # ContactPair: pass through
+        if isinstance(data, ContactPair):
+            return data
+
+        # String: parse using from_string
+        if isinstance(data, str):
+            parsed = cls.from_string(data)
+            if parsed is None:
+                raise ValueError(f"Failed to parse contact pair from string: '{data}'")
+            return parsed
+
+        # Int: single contact
+        if isinstance(data, int):
+            return cls(first_contact=data)
+
+        # Tuple: unpack into constructor
+        if isinstance(data, tuple):
+            if len(data) <= 4:
+                return cls(*data)
+            else:
+                raise ValueError(f"Tuple length must be <= 4, got {len(data)}")
+
+        # Unknown type
+        raise ValueError(f"Expected int, tuple, str, or ContactPair, got {type(data)}")
 
     def __str__(self) -> str:
         result = f"{self.first_contact}"
@@ -78,28 +124,141 @@ class ContactPair:
         return result
 
     def __post_init__(self):
-        if isinstance(self.polarization, str):
-            self.polarization = PolarizationType(self.polarization)
-        if isinstance(self.magnitude, (str, int, float)):
-            self.magnitude = Decimal(str(self.magnitude))
+        # Validate first_contact is not None
+        if self.first_contact is None:
+            raise ValueError("first_contact cannot be None")
 
-    def parse_contacts(self, text: str) -> bool:
+        # Convert types (use object.__setattr__ for frozen dataclass)
+        if isinstance(self.polarization, str):
+            object.__setattr__(self, 'polarization', PolarizationType(self.polarization))
+        if isinstance(self.magnitude, (str, int, float)):
+            object.__setattr__(self, 'magnitude', Decimal(str(self.magnitude)))
+
+    @classmethod
+    def from_string(cls, text: str) -> "ContactPair | None":
+        """
+        Parse contact pair from string.
+
+        Args:
+            text: String representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+
+        Returns:
+            ContactPair instance if parsing succeeds, None otherwise
+        """
         m = contact_pattern.match(text)
         if not m:
-            return False
+            return None
         type_str, first, second, magnitude = m.groups()
-        self.first_contact = int(first)
-        self.second_contact = int(second) if second else None
-        self.polarization = PolarizationType(type_str)
-        self.magnitude = self._convert_magntude(magnitude) if magnitude else None
-        return True
+        return cls(
+            first_contact=int(first),
+            second_contact=int(second) if second else None,
+            polarization=PolarizationType(type_str),
+            magnitude=cls._convert_magntude(magnitude) if magnitude else None,
+        )
 
-    def pair_matches(self, pair: Iterable[int] | int | 'ContactPair') -> bool:
+    def pair_matches(self, pair: int | tuple | str | ContactPair) -> bool:
+        """
+        Progressive matching based on input type.
+
+        Args:
+            pair: Match specification
+                - int: match single contact (first_contact=n, second_contact=None)
+                - tuple[2]: match contacts only
+                - tuple[3]: match contacts + polarization
+                - tuple[4]: match contacts + polarization + magnitude
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+                - ContactPair: exact equality check (all fields must match)
+
+        Returns:
+            bool: True if matches according to progressive rules
+        """
+        # Handle string: convert to ContactPair
+        if isinstance(pair, str):
+            pair = ContactPair.make_from(pair)
+            return self == pair
+
+        # Handle ContactPair: exact equality
+        if isinstance(pair, ContactPair):
+            return self == pair
+
+        # Handle int: single contact
         if isinstance(pair, int):
             return self.first_contact == pair and self.second_contact is None
-        elif isinstance(pair, ContactPair):
-            return self == pair
-        return self.first_contact == pair[0] and self.second_contact == pair[1]
+
+        # Handle tuple: progressive matching
+        if isinstance(pair, tuple):
+            pair_len = len(pair)
+
+            if pair_len == 2:
+                # Match contacts only
+                first, second = pair
+                return self.first_contact == first and self.second_contact == second
+
+            elif pair_len == 3:
+                # Match contacts + polarization
+                first, second, polarization = pair
+                return (
+                    self.first_contact == first
+                    and self.second_contact == second
+                    and self.polarization == polarization
+                )
+
+            elif pair_len == 4:
+                # Match contacts + polarization + magnitude (exact equality)
+                return self == type(self)(*pair)
+
+            else:
+                raise ValueError(f"Tuple length must be 2-4, got {pair_len}")
+
+        raise TypeError(f"Expected int, tuple, str, or ContactPair, got {type(pair)}")
+
+    def contacts_match(self, other: int | tuple | str | ContactPair) -> bool:
+        """
+        Match only contact numbers, ignoring polarization and magnitude.
+
+        Args:
+            other: Contact specification
+                - int: single contact
+                - tuple: contact pair (uses first 1-2 elements)
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+                - ContactPair: compare contact numbers directly
+
+        Returns:
+            bool: True if contact numbers match
+
+        Examples:
+            >>> pair = ContactPair(1, 2, 'I', 1e-6)
+            >>> pair.contacts_match(ContactPair(1, 2, 'V', 2e-6))  # True
+            >>> pair.contacts_match((1, 2))  # True
+            >>> pair.contacts_match((1, 2, 'V'))  # True (ignores polarization)
+            >>> pair.contacts_match("I1-2")  # True (ignores polarization)
+            >>> pair.contacts_match((2, 1))  # False (order matters)
+        """
+        # Handle string: convert to ContactPair
+        if isinstance(other, str):
+            other = ContactPair.make_from(other)
+            return (
+                self.first_contact == other.first_contact
+                and self.second_contact == other.second_contact
+            )
+
+        if isinstance(other, int):
+            return self.first_contact == other and self.second_contact is None
+
+        if isinstance(other, ContactPair):
+            return (
+                self.first_contact == other.first_contact
+                and self.second_contact == other.second_contact
+            )
+
+        if isinstance(other, tuple):
+            if len(other) == 0:
+                raise ValueError("Empty tuple not allowed")
+            first = other[0]
+            second = other[1] if len(other) >= 2 else None
+            return self.first_contact == first and self.second_contact == second
+
+        raise TypeError(f"Expected int, tuple, str, or ContactPair, got {type(other)}")
 
     def to_tuple(self):
         return (
@@ -120,7 +279,8 @@ class ContactPair:
             magnitude=magnitude,
         )
 
-    def _convert_magntude(self, magnitude):
+    @staticmethod
+    def _convert_magntude(magnitude):
         return Decimal(
             magnitude.replace('f', 'e-15')
             .replace('p', 'e-12')
@@ -197,7 +357,7 @@ class MeasurementFile:
         self,
         *,
         mode: str = 'all',
-        contacts: tuple[int, int] | list[tuple[int, int] | int] | int | None = None,
+        contacts: tuple[int, int] | list[tuple[int, int] | int | str | ContactPair] | int | str | ContactPair | None = None,
         polarization: str | None = None,
         sweeps: list[str] | str | None = None,
         sweep_directions: list[str | None] | str | None = None,
@@ -210,7 +370,8 @@ class MeasurementFile:
 
         Args:
             mode: 'all' for AND logic (default), 'any' for OR logic
-            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
+            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3, "I1-2"],
+                     single contact, string ("I1-2(2uA)"), or ContactPair instance
             polarization: 'I' for current or 'V' for voltage
             sweeps: Sweep parameter(s) to match
             sweep_directions: 'inc', 'dec', or None
@@ -315,7 +476,7 @@ class MeasurementFile:
         return is_swept and is_correct_direction
 
     def check_contacts(
-        self, contacts: tuple[int, int] | list[tuple[int, int] | int] | int
+        self, contacts: tuple[int, int] | list[tuple[int, int] | int | str | ContactPair] | int | str | ContactPair
     ) -> bool:
         """Check if file contains specified contact configuration"""
 
@@ -458,9 +619,204 @@ class MeasurementFile:
             )
         return param
 
+    def set_parameter_fixed(self, name: str, value: float | str) -> None:
+        """
+        Set a parameter to a fixed value.
+
+        Args:
+            name: Parameter name
+            value: Fixed value (numeric or special string value like 'IP', 'OOP')
+        """
+        param = self.get_parameter(name)
+        param.set_fixed(value)
+
+    def set_parameter_swept(
+        self,
+        name: str,
+        min_val: float | str | None = None,
+        max_val: float | str | None = None,
+    ) -> None:
+        """
+        Set a parameter as swept.
+
+        Args:
+            name: Parameter name
+            min_val: Minimum value (None for undefined sweep)
+            max_val: Maximum value (None for undefined sweep)
+
+        Note:
+            Sweep direction is automatically inferred from min_val and max_val.
+            If both are None, creates an undefined sweep (e.g., 'sweepTemp').
+        """
+        param = self.get_parameter(name)
+        param.set_swept(min_val, max_val)
+
     def state_of(self, name: str) -> ParameterState:
         param = self.get_parameter(name)
         return ParameterState.from_state(param.state)
+
+    def add_contacts(
+        self,
+        contacts: int | tuple | ContactPair | list[int | tuple | ContactPair],
+    ) -> None:
+        """
+        Add new contact pair(s) to the file.
+
+        Args:
+            contacts: Contact specification(s) to add:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - ContactPair: full contact pair object
+                - list: any combination of above types
+
+        Raises:
+            ValueError: If contact pair already exists
+
+        Examples:
+            >>> file.add_contacts(1)  # Add single contact
+            >>> file.add_contacts((1, 2))  # Add contact pair
+            >>> file.add_contacts((1, 2, 'I', 2e-6))  # Add with polarization and magnitude
+            >>> file.add_contacts([(1, 2), (3, 4)])  # Add multiple
+        """
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Convert to ContactPair if needed
+            new_pair = ContactPair.make_from(contact_spec)
+
+            # Check if contact already exists
+            for existing_pair in self.contact_pairs:
+                if existing_pair.pair_matches(new_pair):
+                    raise ValueError(
+                        f"Contact pair {new_pair} already exists in file {self.name}"
+                    )
+
+            # Add new contact pair
+            self.contact_pairs.append(new_pair)
+
+    def update_contacts(
+        self,
+        contacts: int | tuple | ContactPair | list[int | tuple | ContactPair],
+    ) -> None:
+        """
+        Update existing contact pair(s) - modifies polarization and/or magnitude only.
+
+        Contact numbers (first_contact, second_contact) are NOT updated.
+        Matches by contact numbers only, ignoring current polarization/magnitude.
+        If multiple pairs exist with the same contacts, only the first is updated.
+
+        Matching is order-sensitive: (1, 2) only matches (1, 2), not (2, 1).
+
+        Args:
+            contacts: Contact specification(s) to update:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - ContactPair: full contact pair object
+                - list: any combination of above types
+
+        Raises:
+            ValueError: If contact pair not found
+
+        Examples:
+            >>> # File has: I1-2(2uA)
+            >>> file.update_contacts((1, 2, 'V', 5))  # Updates I1-2(2uA) → V1-2(5V)
+            >>> file.update_contacts((1, 2, 'I', None))  # Updates V1-2(5V) → I1-2
+            >>> file.update_contacts((1, 2))  # Updates I1-2 → 1-2 (removes polarization)
+            >>> # File has: I1-2(2uA) and V1-2(1V)
+            >>> file.update_contacts((1, 2, 'I', 3e-6))  # Updates first match only (I1-2)
+        """
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Convert spec to ContactPair to get new values
+            update_pair = ContactPair.make_from(contact_spec)
+
+            # Find matching contact pair using contacts_match (ignores polarization/magnitude)
+            found = False
+            for i, existing_pair in enumerate(self.contact_pairs):
+                if existing_pair.contacts_match(contact_spec):
+                    # Create new ContactPair with updated polarization/magnitude
+                    # but keep original contact numbers
+                    self.contact_pairs[i] = ContactPair(
+                        first_contact=existing_pair.first_contact,
+                        second_contact=existing_pair.second_contact,
+                        polarization=update_pair.polarization,
+                        magnitude=update_pair.magnitude,
+                    )
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"Contact pair matching {contact_spec} not found in file {self.name}"
+                )
+
+    def drop_contacts(
+        self,
+        contacts: int | tuple | list[int | tuple] | str,
+    ) -> None:
+        """
+        Remove contact pair(s) from the file.
+
+        Uses progressive matching to find contacts:
+        - tuple[2]: matches by contacts only (first match if ambiguous)
+        - tuple[3]: matches by contacts + polarization
+        - tuple[4]: matches exactly (all fields)
+
+        Matching is order-sensitive: (1, 2) only matches (1, 2), not (2, 1).
+
+        Args:
+            contacts: Contact specification(s) to remove:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - list: list of ints or tuples
+                - 'all': special string to remove all contacts
+
+        Raises:
+            ValueError: If contact not found
+
+        Examples:
+            >>> # File has: I1-2(2uA) and V1-2(1V)
+            >>> file.drop_contacts((1, 2, 'V'))  # Drops V1-2(1V) only
+            >>> file.drop_contacts((1, 2))  # Drops first match (I1-2 in this case)
+            >>> file.drop_contacts([(3, 4), (5, 6)])  # Drop multiple
+            >>> file.drop_contacts('all')  # Drop all contacts
+        """
+        # Handle 'all' special case
+        if contacts == 'all':
+            self.contact_pairs.clear()
+            return
+
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Find and remove matching contact pair using progressive matching
+            found = False
+            for i, existing_pair in enumerate(self.contact_pairs):
+                if existing_pair.pair_matches(contact_spec):
+                    self.contact_pairs.pop(i)
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"Contact pair matching {contact_spec} not found in file {self.name}"
+                )
 
     def _parse_filename(self) -> None:
         # Get filename without extension
@@ -473,9 +829,8 @@ class MeasurementFile:
 
     def _parse_part(self, part: str) -> None:
         # Try to parse as contact pair first
-        contact_pair = ContactPair()
-        is_contact = contact_pair.parse_contacts(part)
-        if is_contact:
+        contact_pair = ContactPair.from_string(part)
+        if contact_pair is not None:
             self.contact_pairs.append(contact_pair)
             return
 
