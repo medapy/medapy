@@ -14,8 +14,7 @@ from pint.errors import UndefinedUnitError
 
 from .utils.warnings import UnitOverwriteWarning
 
-ureg = pint.UnitRegistry()
-pint.set_application_registry(ureg)
+ureg = pint.get_application_registry()
 
 
 def update_column_names(func):
@@ -765,6 +764,11 @@ class MeasurementSheetAccessor:
             raise KeyError(f"'{name}' is neither a label nor a column")
 
     def rename(self, columns: dict[str, str]) -> None:
+        # Check for conflicts with labels
+        invalid_columns = self._get_nonuniques_with_counts(columns.values(), self.labels)
+        if invalid_columns:
+            raise ValueError(f"New column names conflict with labels: {', '.join(invalid_columns)}")
+
         self._obj.rename(columns=columns, inplace=True)
         self._update_column_maps(columns)
 
