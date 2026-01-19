@@ -52,7 +52,7 @@ class DataProcessingAccessor():
 
     def check_monotonic(self, interrupt=False):
         # check = misc.check_monotonic_df(self._obj, self.col_x, interrupt=False)
-        check = misc.check_monotonic_arr(self.x, interrupt=False)
+        check = misc.check_monotonic_arr(self.x.values, interrupt=False)
         if interrupt and check == 0:
             raise ValueError(f'Column `{self.col_x}` is not monotonic')
         return check
