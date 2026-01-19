@@ -8,7 +8,6 @@ dist/
 # Implement later
 superconductivity/
 decide_later/
-tests/
 
 # Internal TODO/notes
 _internal_todo.md
@@ -16,6 +15,7 @@ _internal_todo.md
 # Local environment
 # Virtual environment
 .venv/
+.zed/
 
 # Implementation scratches
 scratch/
