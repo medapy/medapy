@@ -1,14 +1,15 @@
+from __future__ import annotations
 from dataclasses import dataclass
+from itertools import zip_longest
 import re
-from enum import Enum, auto
+import warnings
+from enum import Enum
 from pathlib import Path
 from decimal import Decimal
 from typing import Iterable
 
-from .parameter import (ParameterDefinition,
-                        DefinitionsLoader,
-                        Parameter,
-                        ParameterState)
+from .parameter import ParameterDefinition, DefinitionsLoader, Parameter, ParameterState, SweepDirection
+from medapy.utils import validations
 
 
 class PolarizationType(Enum):
@@ -26,72 +27,278 @@ class PolarizationType(Enum):
                 return cls.CURRENT
             elif value in cls.__aliases_voltage:
                 return cls.VOLTAGE
-    
+
     def __eq__(self, other):
         if isinstance(other, str):
             other = self._missing_(other)
         return super().__eq__(other)
-    
+
     def __hash__(self):
         return super().__hash__()
 
-contact_pattern = re.compile(r'([IV])(\d+)(?:-(\d+))?(?:\((-?\d+\.?\d*(?:[eE][+-]?\d+)?[fpnumkMGT]?[AV])\))?')
 
-@dataclass
+contact_pattern = re.compile(
+    r'([IV])(\d+)(?:-(\d+))?(?:\((-?\d+\.?\d*(?:[eE][+-]?\d+)?[fpnumkMGT]?[AV])\))?'
+)
+
+
+@dataclass(frozen=True)
 class ContactPair:
     # For single contact, second_contact will be None
     first_contact: int | None = None
     second_contact: int | None = None
-    type: PolarizationType | None = None
+    polarization: PolarizationType | None = None
     magnitude: Decimal | None = None
 
+    def __copy__(self):
+        return type(self)(
+            first_contact=self.first_contact,
+            second_contact=self.second_contact,
+            polarization=self.polarization,
+            magnitude=self.magnitude,
+        )
+
+    @classmethod
+    def make_from(cls, data: int | tuple | str | "ContactPair") -> "ContactPair":
+        """
+        Create ContactPair from various input formats.
+
+        Args:
+            data: Contact specification
+                - int: single contact (e.g., 1)
+                - tuple[2]: (first_contact, second_contact)
+                - tuple[3]: (first_contact, second_contact, polarization)
+                - tuple[4]: (first_contact, second_contact, polarization, magnitude)
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "1")
+                - ContactPair: returns as-is
+
+        Returns:
+            ContactPair instance
+
+        Raises:
+            ValueError: If invalid input type or string parsing fails
+        """
+        # ContactPair: pass through
+        if isinstance(data, ContactPair):
+            return data
+
+        # String: parse using from_string
+        if isinstance(data, str):
+            parsed = cls.from_string(data)
+            if parsed is None:
+                raise ValueError(f"Failed to parse contact pair from string: '{data}'")
+            return parsed
+
+        # Int: single contact
+        if isinstance(data, int):
+            return cls(first_contact=data)
+
+        # Tuple: unpack into constructor
+        if isinstance(data, tuple):
+            if len(data) <= 4:
+                return cls(*data)
+            else:
+                raise ValueError(f"Tuple length must be <= 4, got {len(data)}")
+
+        # Unknown type
+        raise ValueError(f"Expected int, tuple, str, or ContactPair, got {type(data)}")
+
+    def __str__(self) -> str:
+        result = f"{self.first_contact}"
+        if self.second_contact is not None:
+            result += f"-{self.second_contact}"
+
+        if self.polarization is not None:
+            result = f"{self.polarization.value}" + result
+
+            if self.magnitude is not None:
+                if self.polarization == PolarizationType.CURRENT:
+                    unit = 'A'
+                else:
+                    unit = 'V'
+                result += "({magn:{fmt}}{unit})".format(
+                    magn=self.magnitude,
+                    fmt='.2g' if 0.01 <= self.magnitude <= 100 else '.1e',
+                    unit=unit,
+                )
+        return result
+
     def __post_init__(self):
-        if isinstance(self.type, str):
-            self.type = PolarizationType(self.type)
+        # Validate first_contact is not None
+        if self.first_contact is None:
+            raise ValueError("first_contact cannot be None")
+
+        # Convert types (use object.__setattr__ for frozen dataclass)
+        if isinstance(self.polarization, str):
+            object.__setattr__(self, 'polarization', PolarizationType(self.polarization))
         if isinstance(self.magnitude, (str, int, float)):
-            self.magnitude = Decimal(str(self.magnitude))
-    
-    def parse_contacts(self, text: str) -> bool:
+            object.__setattr__(self, 'magnitude', Decimal(str(self.magnitude)))
+
+    @classmethod
+    def from_string(cls, text: str) -> "ContactPair | None":
+        """
+        Parse contact pair from string.
+
+        Args:
+            text: String representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+
+        Returns:
+            ContactPair instance if parsing succeeds, None otherwise
+        """
         m = contact_pattern.match(text)
         if not m:
-            return False
+            return None
         type_str, first, second, magnitude = m.groups()
-        self.first_contact = int(first)
-        self.second_contact = int(second) if second else None
-        self.type = PolarizationType(type_str)
-        self.magnitude = self._convert_magntude(magnitude) if magnitude else None
-        return True
-    
-    def _convert_magntude(self, magnitude):
-        return Decimal(magnitude.replace('f', 'e-15')
-                       .replace('p', 'e-12')
-                       .replace('n', 'e-9')
-                       .replace('u', 'e-6')
-                       .replace('m', 'e-3')
-                       .replace('k', 'e3')
-                       .replace('M', 'e6')
-                       .replace('G', 'e9')
-                       .replace('T', 'e12')
-                       .rstrip('AV'))
-    
-    def pair_matches(self, pair: Iterable[int] | int | 'ContactPair') -> bool:
-        if isinstance(pair, int):
-            return (self.first_contact == pair and 
-                    self.second_contact is None)
-        elif isinstance(pair, ContactPair):
-            return self == pair
-        return (self.first_contact == pair[0] and 
-                self.second_contact == pair[1])
-        
-    def __str__(self) -> str:
-        contacts = f"{self.first_contact}"
-        if self.second_contact is not None:
-            contacts += f"-{self.second_contact}"
+        return cls(
+            first_contact=int(first),
+            second_contact=int(second) if second else None,
+            polarization=PolarizationType(type_str),
+            magnitude=cls._convert_magntude(magnitude) if magnitude else None,
+        )
 
-        result = f"{self.type.value}{contacts}"
-        if self.magnitude is not None:
-            result += f"({self.magnitude})"
-        return result
+    def pair_matches(self, pair: int | tuple | str | ContactPair) -> bool:
+        """
+        Progressive matching based on input type.
+
+        Args:
+            pair: Match specification
+                - int: match single contact (first_contact=n, second_contact=None)
+                - tuple[2]: match contacts only
+                - tuple[3]: match contacts + polarization
+                - tuple[4]: match contacts + polarization + magnitude
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+                - ContactPair: exact equality check (all fields must match)
+
+        Returns:
+            bool: True if matches according to progressive rules
+        """
+        # Handle string: convert to ContactPair
+        if isinstance(pair, str):
+            pair = ContactPair.make_from(pair)
+            return self == pair
+
+        # Handle ContactPair: exact equality
+        if isinstance(pair, ContactPair):
+            return self == pair
+
+        # Handle int: single contact
+        if isinstance(pair, int):
+            return self.first_contact == pair and self.second_contact is None
+
+        # Handle tuple: progressive matching
+        if isinstance(pair, tuple):
+            pair_len = len(pair)
+
+            if pair_len == 2:
+                # Match contacts only
+                first, second = pair
+                return self.first_contact == first and self.second_contact == second
+
+            elif pair_len == 3:
+                # Match contacts + polarization
+                first, second, polarization = pair
+                return (
+                    self.first_contact == first
+                    and self.second_contact == second
+                    and self.polarization == polarization
+                )
+
+            elif pair_len == 4:
+                # Match contacts + polarization + magnitude (exact equality)
+                return self == type(self)(*pair)
+
+            else:
+                raise ValueError(f"Tuple length must be 2-4, got {pair_len}")
+
+        raise TypeError(f"Expected int, tuple, str, or ContactPair, got {type(pair)}")
+
+    def contacts_match(self, other: int | tuple | str | ContactPair) -> bool:
+        """
+        Match only contact numbers, ignoring polarization and magnitude.
+
+        Args:
+            other: Contact specification
+                - int: single contact
+                - tuple: contact pair (uses first 1-2 elements)
+                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "V1")
+                - ContactPair: compare contact numbers directly
+
+        Returns:
+            bool: True if contact numbers match
+
+        Examples:
+            >>> pair = ContactPair(1, 2, 'I', 1e-6)
+            >>> pair.contacts_match(ContactPair(1, 2, 'V', 2e-6))  # True
+            >>> pair.contacts_match((1, 2))  # True
+            >>> pair.contacts_match((1, 2, 'V'))  # True (ignores polarization)
+            >>> pair.contacts_match("I1-2")  # True (ignores polarization)
+            >>> pair.contacts_match((2, 1))  # False (order matters)
+        """
+        # Handle string: convert to ContactPair
+        if isinstance(other, str):
+            other = ContactPair.make_from(other)
+            return (
+                self.first_contact == other.first_contact
+                and self.second_contact == other.second_contact
+            )
+
+        if isinstance(other, int):
+            return self.first_contact == other and self.second_contact is None
+
+        if isinstance(other, ContactPair):
+            return (
+                self.first_contact == other.first_contact
+                and self.second_contact == other.second_contact
+            )
+
+        if isinstance(other, tuple):
+            if len(other) == 0:
+                raise ValueError("Empty tuple not allowed")
+            first = other[0]
+            second = other[1] if len(other) >= 2 else None
+            return self.first_contact == first and self.second_contact == second
+
+        raise TypeError(f"Expected int, tuple, str, or ContactPair, got {type(other)}")
+
+    def to_tuple(self):
+        return (
+            self.first_contact,
+            self.second_contact,
+            self.polarization,
+            self.magnitude,
+        )
+
+    def copy(self):
+        return self.__copy__()
+
+    def polarized(self, polarization, magnitude=None):
+        return type(self)(
+            self.first_contact,
+            self.second_contact,
+            polarization=polarization,
+            magnitude=magnitude,
+        )
+
+    @staticmethod
+    def _convert_magntude(magnitude):
+        return Decimal(
+            magnitude.replace('f', 'e-15')
+            .replace('p', 'e-12')
+            .replace('n', 'e-9')
+            .replace('u', 'e-6')
+            .replace('m', 'e-3')
+            .replace('k', 'e3')
+            .replace('M', 'e6')
+            .replace('G', 'e9')
+            .replace('T', 'e12')
+            .rstrip('AV')
+        )
+
+    def __hash__(self):
+        return hash(
+            (self.first_contact, self.second_contact, self.polarization, self.magnitude)
+        )
+
 
 @dataclass(frozen=False)
 class MeasurementFile:
@@ -100,10 +307,12 @@ class MeasurementFile:
     contact_pairs: list[ContactPair]
     separator: str = "_"
 
-    def __init__(self, 
-                 path: str | Path,
-                 parameters: list[ParameterDefinition | Parameter] | Path | str,
-                 separator: str = "_"):
+    def __init__(
+        self,
+        path: str | Path,
+        parameters: list[ParameterDefinition | Parameter] | Path | str,
+        separator: str = "_",
+    ):
         """
         Initialize MeasurementFile
 
@@ -121,53 +330,154 @@ class MeasurementFile:
             param_defs = DefinitionsLoader(parameters)
             self.param_definitions = {dfn.name_id: dfn for dfn in param_defs.get_all()}
         else:
+            item_type = type(parameters[0])
+            validations.class_in_iterable(parameters, item_type, iter_name='parameters')
             # Convert list of parameters to dictionary
-            self.param_definitions = {}
-            for param in parameters:
-                name = param.name_id
-                self.param_definitions[name] = param
-                
+            self.param_definitions = dict()
+            if item_type == Parameter:
+                self.parameters = dict()
+                for param in parameters:
+                    name = param.definition.name_id
+                    self.param_definitions[name] = param.definition
+                    self.parameters[name] = param.copy()
+                return
+            if item_type == ParameterDefinition:
+                for param in parameters:
+                    name = param.name_id
+                    self.param_definitions[name] = param
+
         self.parameters = dict()
         self._parse_filename()
 
-    def check(self,
-              contacts: tuple[int, int] | list[tuple[int, int] | int] | int | None = None,
-              polarization: str | None = None,
-              sweep_direction: str | None = None,
-              **parameter_filters: dict) -> bool:
-        """Check if file matches all filter conditions"""
-                
-        # Check contacts
-        if contacts is not None:
-            if not self.check_contacts(contacts):
-                return False
+    @property
+    def name(self) -> str:
+        return self.path.name
 
-        # Check polarization
-        if polarization is not None:
-            if not self.check_polarization(polarization):
-                return False
+    def check(
+        self,
+        *,
+        mode: str = 'all',
+        contacts: tuple[int, int] | list[tuple[int, int] | int | str | ContactPair] | int | str | ContactPair | None = None,
+        polarization: str | None = None,
+        sweeps: list[str] | str | None = None,
+        sweep_directions: list[str | None] | str | None = None,
+        exact_sweep: bool = True,
+        name_contains: list[str] | str | None = None,
+        **parameter_filters: dict,
+    ) -> bool:
+        """
+        Check if file matches filter conditions with configurable logic
 
-        # Check sweep direction
-        if sweep_direction is not None:
-            if not self.check_sweep_direction(sweep_direction):
-                return False
+        Args:
+            mode: 'all' for AND logic (default), 'any' for OR logic
+            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3, "I1-2"],
+                     single contact, string ("I1-2(2uA)"), or ContactPair instance
+            polarization: 'I' for current or 'V' for voltage
+            sweeps: Sweep parameter(s) to match
+            sweep_directions: 'inc', 'dec', or None
+            exact_sweep: Whether to match sweep ranges exactly
+            name_contains: String(s) or regex pattern(s) that must appear in filename
+            **parameter_filters: Parameter name with value or (min, max) tuple
 
-        # Check parameter filters
-        for param_name, filter_value in parameter_filters.items():
-            if not self.check_parameter(param_name, filter_value):
-                return False
-            
-        return True
+        Returns:
+            bool: True if criteria match according to mode
+        """
+
+        def _check_generator():
+            """Lazy generator of individual check results"""
+            if contacts is not None:
+                yield self.check_contacts(contacts)
+
+            if polarization is not None:
+                yield self.check_polarization(polarization)
+
+            if sweeps is not None:
+                yield self.check_sweeps(sweeps, sweep_directions)
+
+            if name_contains is not None:
+                yield self.check_name(name_contains)
+
+            # Check parameter filters
+            for param_name, filter_value in parameter_filters.items():
+                if param_name.endswith('_sweep'):
+                    # Handle sweep parameter filtering
+                    base_name = param_name[:-6]  # Remove '_sweep' suffix
+                    yield self.check_parameter(
+                        base_name, filter_value, swept=True, exact_sweep=exact_sweep
+                    )
+                else:
+                    # Handle fixed parameter filtering
+                    yield self.check_parameter(
+                        param_name, filter_value, swept=False, exact_sweep=exact_sweep
+                    )
+
+        if mode == 'all':
+            return all(_check_generator())
+        elif mode == 'any':
+            return any(_check_generator())
+        else:
+            raise ValueError(f"mode must be 'all' or 'any', got '{mode}'")
 
     def check_polarization(self, polarization: str):
-        return any(pair.type == polarization for pair in self.contact_pairs)
-    
-    def check_sweep_direction(self, sweep_direction: str):
-        return any(param.state.sweep_direction == sweep_direction 
-                    for param in self.parameters.values())
-            
-    def check_contacts(self,
-                       contacts: tuple[int, int] | list[tuple[int, int] | int] | int) -> bool:
+        return any(pair.polarization == polarization for pair in self.contact_pairs)
+
+    def check_name(self, strings: list[str] | str) -> bool:
+        """Check if filename contains specified string(s) or matches regex pattern(s)"""
+        if not isinstance(strings, (list, tuple)):
+            strings = [strings]
+
+        filename = self.name
+
+        for pattern in strings:
+            try:
+                if re.search(pattern, filename):
+                    continue
+                else:
+                    return False
+            except re.error as e:
+                warnings.warn(
+                    f"Invalid regex pattern '{pattern}': {e}. "
+                    f"Falling back to substring matching.",
+                    UserWarning,
+                )
+                if pattern in filename:
+                    continue
+                else:
+                    return False
+
+        return True
+
+    def check_sweeps(
+        self, sweeps: list[str] | str, directions: list[str | None] | str | None = None
+    ):
+        if not isinstance(sweeps, (list, tuple)):
+            sweeps = [sweeps]
+        if not isinstance(directions, (list, tuple)):
+            directions = [directions]
+        if len(sweeps) < len(directions):
+            raise ValueError(
+                f"Number of sweeps ({len(sweeps)}) is smaller "
+                f"than number of directions ({len(directions)})"
+            )
+        sweeps_and_dirs = zip_longest(sweeps, directions)
+
+        return all(self.check_sweep(*sweep) for sweep in sweeps_and_dirs)
+
+    def check_sweep(self, sweep: str | None, direction: str | None = None):
+        param = self.parameters.get(sweep)
+        if not param:
+            return False
+
+        is_swept = param.state.is_swept
+        if not direction:
+            return is_swept
+
+        is_correct_direction = param.state.sweep_direction == direction
+        return is_swept and is_correct_direction
+
+    def check_contacts(
+        self, contacts: tuple[int, int] | list[tuple[int, int] | int | str | ContactPair] | int | str | ContactPair
+    ) -> bool:
         """Check if file contains specified contact configuration"""
 
         # Convert single pair/contact to list
@@ -176,51 +486,408 @@ class MeasurementFile:
 
         # Check if all specified contacts/pairs are present
         return all(
-            any(pair.pair_matches(check_pair) 
-                for pair in self.contact_pairs)
+            any(pair.pair_matches(check_pair) for pair in self.contact_pairs)
             for check_pair in contacts
         )
 
-    def check_parameter(self,
-                        name: str,
-                        value) -> bool:
+    def check_parameter(
+        self,
+        name: str,
+        value: list[float, float] | float,
+        swept: bool | None = None,
+        exact_sweep: bool = True,
+    ) -> bool:
         """Check if parameter matches value or range"""
         param = self.parameters.get(name)
         if not param:
             return False
 
-        # Handle exact value
-        if not isinstance(value, Iterable):
-            if param.state.is_swept:
+        if swept is not None:
+            # Filter by swept state if specified
+            if swept and not param.state.is_swept:
                 return False
-            return param.state.value == param._value2decimal(value)
+            if not swept and param.state.is_swept:
+                return False
+
+        # Delegate to appropriate implementation
+        if param.state.is_swept:
+            return self._check_sweep_parameter(name, value, exact_sweep)
+        else:
+            return self._check_fixed_parameter(name, value)
+
+    def _validate_parameter_range(self, name: str, value) -> tuple:
+        """
+        Validate and prepare parameter range for filtering.
+
+        Handles:
+        - Numeric ranges: (5, 10)
+        - Open boundaries: (5, None) or (None, 10)
+        - Special string values: ('IP', 'OOP') for parameters with shortcuts
+
+        Args:
+            name: Parameter name
+            value: Range tuple/list (min, max) where values can be numeric, string, or None
+
+        Returns:
+            tuple: (min_val, max_val) as Decimal, ready for comparison
+
+        Raises:
+            TypeError: If value is a string or not iterable
+            ValueError: If value doesn't have exactly 2 elements
+        """
+        param = self.parameters.get(name)
+
+        # Strings are iterable but shouldn't be treated as ranges
+        if isinstance(value, str):
+            raise TypeError(
+                f"Range for parameter '{name}' cannot be a string. Got: '{value}'"
+            )
+
+        try:
+            range_list = list(value)
+        except TypeError:
+            raise TypeError(
+                f"Range for parameter '{name}' must be an iterable (tuple, list, etc.)"
+            )
+
+        if len(range_list) != 2:
+            raise ValueError(
+                f"Range for parameter '{name}' must contain exactly 2 values, "
+                f"got {len(range_list)}"
+            )
+
+        min_val, max_val = range_list
+
+        # Convert None to infinity, let param.decimal_of handle everything else
+        if min_val is None:
+            min_val = param.decimal_of('-inf')
+        else:
+            # Handle both numbers and special string values
+            min_val = param.decimal_of(str(min_val))
+
+        if max_val is None:
+            max_val = param.decimal_of('inf')
+        else:
+            max_val = param.decimal_of(str(max_val))
+
+        # Swap if needed
+        if min_val > max_val:
+            min_val, max_val = max_val, min_val
+
+        return min_val, max_val
+
+    def _check_fixed_parameter(
+        self, name: str, value: list[float, float] | float
+    ) -> bool:
+        """Protected: Handle fixed parameter logic"""
+        param = self.parameters.get(name)
+
+        # Handle exact value (including string special values like 'OOP', 'IP')
+        # Strings are iterable, but are single values
+        if isinstance(value, str) or not isinstance(value, Iterable):
+            return param.state.value == param.decimal_of(str(value))
+
+        # Handle range - for fixed parameter, check if value is within range
+        min_val, max_val = self._validate_parameter_range(name, value)
+        return min_val <= param.state.value <= max_val
+
+    def _check_sweep_parameter(
+        self, name: str, value: list[float, float] | float, exact_sweep: bool = True
+    ) -> bool:
+        """Protected: Handle sweep parameter logic"""
+        param = self.parameters.get(name)
+
+        # Handle exact value - swept parameters can't match exact values
+        # Strings are iterable, but are single values
+        if isinstance(value, str) or not isinstance(value, Iterable):
+            return False
 
         # Handle range
-        try:
-            min_val, max_val = map(param._value2decimal, value)
-            if min_val > max_val:
-                min_val, max_val = max_val, min_val
-        except ValueError:
-            raise ValueError("Param range length should be 2; "
-                             f"got {len(value)} for {name}")
-        if param.state.is_swept:
-            # For swept parameter, check if sweep range overlaps with filter range
-            return (param.state.min_val <= max_val and 
-                   param.state.max_val >= min_val)
+        min_val, max_val = self._validate_parameter_range(name, value)
 
-        # For fixed parameter, check if value is within range
-        return min_val <= param.state.value <= max_val
-    
+        # For swept parameter, check if sweep range matches exactly or belongs to it
+        if exact_sweep:
+            return param.state.min_val == min_val and param.state.max_val == max_val
+        else:
+            return param.state.min_val >= min_val and param.state.max_val <= max_val
+
     def get_parameter(self, name: str) -> Parameter:
         param = self.parameters.get(name)
         if not param:
-            raise ValueError(f'{name} parameter is not defined for file {self.path.name}')
+            raise ValueError(
+                f'{name} parameter is not defined for file {self.path.name}'
+            )
         return param
-    
+
+    def set_parameter_fixed(self, name: str, value: float | str) -> None:
+        """
+        Set a parameter to a fixed value.
+
+        Args:
+            name: Parameter name
+            value: Fixed value (numeric or special string value like 'IP', 'OOP')
+        """
+        param = self.get_parameter(name)
+        param.set_fixed(value)
+
+    def set_parameter_swept(
+        self,
+        name: str,
+        min_val: float | str | None = None,
+        max_val: float | str | None = None,
+    ) -> None:
+        """
+        Set a parameter as swept.
+
+        Args:
+            name: Parameter name
+            min_val: Minimum value (None for undefined sweep)
+            max_val: Maximum value (None for undefined sweep)
+
+        Note:
+            Sweep direction is automatically inferred from min_val and max_val.
+            If both are None, creates an undefined sweep (e.g., 'sweepTemp').
+        """
+        param = self.get_parameter(name)
+        param.set_swept(min_val, max_val)
+
     def state_of(self, name: str) -> ParameterState:
         param = self.get_parameter(name)
         return ParameterState.from_state(param.state)
-    
+
+    def value_of(self, name: str) -> float | None:
+        """
+        Get the value of a fixed parameter.
+
+        Args:
+            name: Parameter name
+
+        Returns:
+            Parameter value for fixed parameters, None for swept parameters
+
+        Raises:
+            ValueError: If parameter is not defined for this file
+
+        Examples:
+            >>> file = MeasurementFile(...)
+            >>> temp = file.value_of('temperature')  # Get fixed parameter value
+            >>> field = file.value_of('field')  # Returns None if field is swept
+        """
+        param = self.get_parameter(name)
+        if param.state.is_swept:
+            return None
+        return float(param.state.value) if param.state.value is not None else None
+
+    def range_of(self, name: str) -> tuple[float, float] | None:
+        """
+        Get the range of a swept parameter.
+
+        Returns (start, end) values preserving the sweep direction from the filename.
+        For example, "B14to-14T" returns (14.0, -14.0), not (-14.0, 14.0).
+
+        Args:
+            name: Parameter name
+
+        Returns:
+            Tuple of (start, end) for swept parameters with defined range,
+            None for fixed parameters or swept parameters with undefined range.
+
+        Raises:
+            ValueError: If parameter is not defined for this file
+
+        Examples:
+            >>> file = MeasurementFile(...)
+            >>> # From "B-14to14T" (increasing sweep)
+            >>> file.range_of('magnetic_field')  # Returns (-14.0, 14.0)
+            >>> # From "B14to-14T" (decreasing sweep)
+            >>> file.range_of('magnetic_field')  # Returns (14.0, -14.0)
+            >>> # From "T=4.2K" (fixed parameter)
+            >>> file.range_of('temperature')  # Returns None
+            >>> # From "sweepField" (undefined sweep)
+            >>> file.range_of('magnetic_field')  # Returns None
+        """
+        param = self.get_parameter(name)
+        if not param.state.is_swept:
+            return None
+
+        min_val = param.state.min_val
+        max_val = param.state.max_val
+
+        # Return None if range is undefined
+        if min_val is None or max_val is None:
+            return None
+
+        # Convert to float and return (start, end) preserving sweep direction
+        min_val = float(min_val)
+        max_val = float(max_val)
+
+        if param.state.sweep_direction == SweepDirection.DECREASING:
+            return (max_val, min_val)
+        return (min_val, max_val)
+
+    def add_contacts(
+        self,
+        contacts: int | tuple | ContactPair | list[int | tuple | ContactPair],
+    ) -> None:
+        """
+        Add new contact pair(s) to the file.
+
+        Args:
+            contacts: Contact specification(s) to add:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - ContactPair: full contact pair object
+                - list: any combination of above types
+
+        Raises:
+            ValueError: If contact pair already exists
+
+        Examples:
+            >>> file.add_contacts(1)  # Add single contact
+            >>> file.add_contacts((1, 2))  # Add contact pair
+            >>> file.add_contacts((1, 2, 'I', 2e-6))  # Add with polarization and magnitude
+            >>> file.add_contacts([(1, 2), (3, 4)])  # Add multiple
+        """
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Convert to ContactPair if needed
+            new_pair = ContactPair.make_from(contact_spec)
+
+            # Check if contact already exists
+            for existing_pair in self.contact_pairs:
+                if existing_pair.pair_matches(new_pair):
+                    raise ValueError(
+                        f"Contact pair {new_pair} already exists in file {self.name}"
+                    )
+
+            # Add new contact pair
+            self.contact_pairs.append(new_pair)
+
+    def update_contacts(
+        self,
+        contacts: int | tuple | ContactPair | list[int | tuple | ContactPair],
+    ) -> None:
+        """
+        Update existing contact pair(s) - modifies polarization and/or magnitude only.
+
+        Contact numbers (first_contact, second_contact) are NOT updated.
+        Matches by contact numbers only, ignoring current polarization/magnitude.
+        If multiple pairs exist with the same contacts, only the first is updated.
+
+        Matching is order-sensitive: (1, 2) only matches (1, 2), not (2, 1).
+
+        Args:
+            contacts: Contact specification(s) to update:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - ContactPair: full contact pair object
+                - list: any combination of above types
+
+        Raises:
+            ValueError: If contact pair not found
+
+        Examples:
+            >>> # File has: I1-2(2uA)
+            >>> file.update_contacts((1, 2, 'V', 5))  # Updates I1-2(2uA) → V1-2(5V)
+            >>> file.update_contacts((1, 2, 'I', None))  # Updates V1-2(5V) → I1-2
+            >>> file.update_contacts((1, 2))  # Updates I1-2 → 1-2 (removes polarization)
+            >>> # File has: I1-2(2uA) and V1-2(1V)
+            >>> file.update_contacts((1, 2, 'I', 3e-6))  # Updates first match only (I1-2)
+        """
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Convert spec to ContactPair to get new values
+            update_pair = ContactPair.make_from(contact_spec)
+
+            # Find matching contact pair using contacts_match (ignores polarization/magnitude)
+            found = False
+            for i, existing_pair in enumerate(self.contact_pairs):
+                if existing_pair.contacts_match(contact_spec):
+                    # Create new ContactPair with updated polarization/magnitude
+                    # but keep original contact numbers
+                    self.contact_pairs[i] = ContactPair(
+                        first_contact=existing_pair.first_contact,
+                        second_contact=existing_pair.second_contact,
+                        polarization=update_pair.polarization,
+                        magnitude=update_pair.magnitude,
+                    )
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"Contact pair matching {contact_spec} not found in file {self.name}"
+                )
+
+    def drop_contacts(
+        self,
+        contacts: int | tuple | list[int | tuple] | str,
+    ) -> None:
+        """
+        Remove contact pair(s) from the file.
+
+        Uses progressive matching to find contacts:
+        - tuple[2]: matches by contacts only (first match if ambiguous)
+        - tuple[3]: matches by contacts + polarization
+        - tuple[4]: matches exactly (all fields)
+
+        Matching is order-sensitive: (1, 2) only matches (1, 2), not (2, 1).
+
+        Args:
+            contacts: Contact specification(s) to remove:
+                - int: single contact (e.g., 1)
+                - tuple[2]: contact pair (e.g., (1, 2))
+                - tuple[3]: with polarization (e.g., (1, 2, 'I'))
+                - tuple[4]: with polarization and magnitude (e.g., (1, 2, 'I', 2e-6))
+                - list: list of ints or tuples
+                - 'all': special string to remove all contacts
+
+        Raises:
+            ValueError: If contact not found
+
+        Examples:
+            >>> # File has: I1-2(2uA) and V1-2(1V)
+            >>> file.drop_contacts((1, 2, 'V'))  # Drops V1-2(1V) only
+            >>> file.drop_contacts((1, 2))  # Drops first match (I1-2 in this case)
+            >>> file.drop_contacts([(3, 4), (5, 6)])  # Drop multiple
+            >>> file.drop_contacts('all')  # Drop all contacts
+        """
+        # Handle 'all' special case
+        if contacts == 'all':
+            self.contact_pairs.clear()
+            return
+
+        # Normalize to list
+        if not isinstance(contacts, list):
+            contacts = [contacts]
+
+        # Process each contact specification
+        for contact_spec in contacts:
+            # Find and remove matching contact pair using progressive matching
+            found = False
+            for i, existing_pair in enumerate(self.contact_pairs):
+                if existing_pair.pair_matches(contact_spec):
+                    self.contact_pairs.pop(i)
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"Contact pair matching {contact_spec} not found in file {self.name}"
+                )
+
     def _parse_filename(self) -> None:
         # Get filename without extension
         name = self.path.stem
@@ -232,9 +899,8 @@ class MeasurementFile:
 
     def _parse_part(self, part: str) -> None:
         # Try to parse as contact pair first
-        contact_pair = ContactPair()
-        is_contact = contact_pair.parse_contacts(part)
-        if is_contact:
+        contact_pair = ContactPair.from_string(part)
+        if contact_pair is not None:
             self.contact_pairs.append(contact_pair)
             return
 
@@ -257,3 +923,198 @@ class MeasurementFile:
                 except KeyError:
                     self.parameters[param_name] = param
                 continue
+
+    def merge(
+        self,
+        other: 'MeasurementFile',
+        strict_mode: bool = False,
+    ) -> 'MeasurementFile':
+        """
+        Merge this file representation with another one.
+
+        Args:
+            other: Another FileRepresentation to merge with
+            strict_mode: If True, verify all parameters are equal before merging
+
+        Returns:
+            A new MeasurementFile with merged parameters and contact pairs
+
+        Raises:
+            ValueError: If strict_mode is True and parameters differ between files
+        """
+        # Check parameters in strict mode
+        if strict_mode:
+            for param_name, param in self.parameters.items():
+                if param_name in other.parameters:
+                    other_param = other.parameters[param_name]
+                    # Check if parameters are equal
+                    if param.state != other_param.state:
+                        raise ValueError(
+                            f"Parameter '{param_name}' differs between files in strict mode"
+                        )
+
+        # Merge parameters (self take precedence in case of conflict)
+        merged_parameters = {}
+        merged_parameters.update(other.parameters)
+        merged_parameters.update(self.parameters)
+        parameters_list = [param for param in merged_parameters.values()]
+
+        # Merge contact pairs (removing duplicates)
+        merged_contacts = []
+        seen_contacts = set()
+
+        # Add contacts from self
+        for contact in self.contact_pairs:
+            key = contact.to_tuple()
+            if key not in seen_contacts:
+                merged_contacts.append(contact.copy())
+                seen_contacts.add(key)
+
+        # Add contacts from other
+        for contact in other.contact_pairs:
+            key = contact.to_tuple()
+            if key not in seen_contacts:
+                merged_contacts.append(contact.copy())
+                seen_contacts.add(key)
+
+        # Create a new MeasurementFile with merged data
+        # Use the separator from the current instance
+        merged_file = type(self)(
+            path=self.path, parameters=parameters_list, separator=self.separator
+        )
+        merged_file.contact_pairs = merged_contacts
+
+        merged_filename = merged_file.generate_filename()
+        merged_file.path = merged_file.path.parent / merged_filename
+        return merged_file
+
+    def rename(
+        self,
+        directory: str | Path | None = None,
+        name: str | Path | None = None,
+        prefix: str | None = None,
+        postfix: str | None = None,
+        sep: str | None = None,
+        ext: str | None = None,
+    ) -> None:
+        # Change separator
+        if sep:
+            self.separator = sep
+
+        # Generate new path
+        self.path = self._generate_path(
+            directory=directory,
+            name=name,
+            prefix=prefix,
+            postfix=postfix,
+            sep=sep,
+            ext=ext,
+        )
+
+    def _generate_path(
+        self,
+        directory: str | Path | None = None,
+        name: str | Path | None = None,
+        prefix: str | None = None,
+        postfix: str | None = None,
+        sep: str | None = None,
+        ext: str | None = None,
+    ) -> Path:
+        if not directory:
+            directory = self.path.parent
+        directory = Path(directory).expanduser()
+
+        if not name:
+            name = self.path.stem
+
+        if sep:
+            name = name.replace(self.separator, sep)
+            self.separator = sep
+
+        if prefix:
+            name = self.separator.join([prefix, name])
+
+        if postfix:
+            name = self.separator.join([name, postfix])
+
+        if ext and not ext.startswith('.'):
+            ext = f".{ext}"
+        elif ext is None:
+            ext = self.path.suffix
+        else:
+            ext = ''
+
+        return directory / f"{name}{ext}"
+
+    def copy(self):
+        return self.__copy__()
+
+    def __copy__(self):
+        new = type(self)(
+            path=self.path,
+            parameters=[param for param in self.parameters.values()],
+            separator=self.separator,
+        )
+        new.contact_pairs = [pair.copy() for pair in self.contact_pairs]
+        return new
+
+    def generate_filename(
+        self, prefix: str = None, postfix: str = None, sep: str = None, ext: str = None
+    ) -> str:
+        """
+        Generate a filename based on stored parameters and contact pairs.
+
+        Args:
+            prefix: Optional prefix for the filename
+            postfix: Optional postfix for the filename
+            sep: Optional separator (instance separator if None)
+            ext: File extension (instance extension if None)
+
+        Returns:
+            A string representing the new filename
+        """
+        # Use instance separator if not provided
+        sep = sep if sep is not None else self.separator
+
+        # Build the contact part of the filename
+        contact_parts = []
+        for contacts in self.contact_pairs:
+            contact_parts.append(str(contacts))
+
+        # Determine parameters order
+        parameters_ordered = []
+        # Add sweeping parameters
+        for param in self.parameters.values():
+            if param.state.is_swept:
+                parameters_ordered.append(param)
+        # Add fixed parameters
+        for param in self.parameters.values():
+            if not param.state.is_swept:
+                parameters_ordered.append(param)
+
+        param_parts = []
+        # Build the parameter part of the filename
+        for param in parameters_ordered:
+            param_parts.append(str(param))
+
+        # Combine all parts
+        filename_parts = []
+        if prefix:
+            filename_parts.append(prefix)
+        filename_parts.extend(contact_parts)
+        filename_parts.extend(param_parts)
+        if postfix:
+            filename_parts.append(postfix)
+
+        # Join with separator and add extension
+        filename = sep.join(filename_parts)
+
+        # Add extension if it doesn't already have one
+        if ext and not ext.startswith('.'):
+            ext = f".{ext}"
+        elif ext is None:
+            ext = self.path.suffix
+        else:
+            ext = ''
+
+        return f"{filename}{ext}"

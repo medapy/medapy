@@ -1,12 +1,73 @@
 import warnings
-from typing import Any, Callable
+import numbers
+from typing import Any, Callable, Iterable
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from scipy.signal import savgol_filter as scipy_savgol
 
 
-# Pandas functionality   
+# Python functionality
+def apply_unique(func, **kwargs):
+    """
+    Execute the same function with unique parameters and return a list of results.
+
+    For example, this function allows applying a function to multiple arrays where
+    each array can receive its own set of parameter values. Parameter values
+    for each array should be provided as lists of equal length.
+
+    Parameters
+    ----------
+    func : callable
+        The function to apply.
+    **kwargs : dict
+        Keyword arguments where each value is a list of parameters.
+        Each list must have the same length.
+
+    Returns
+    -------
+    list
+        A list containing the results of executing `func` with its respective parameters.
+
+    Examples
+    --------
+    >>> # some_func(x, param1, param2)
+    >>> apply_unique(some_func, x=[arr1, arr2], param1=['a', 'b'], param2=[1, 2])
+    [result_for_arr1, result_for_arr2]
+
+    Notes
+    -----
+    All parameter lists must have the same length.
+    """
+
+    if not callable(func):
+        raise TypeError("'func' value should be callable")
+    first_param = True
+    expected_length = None
+    for param, values_list in kwargs.items():
+        try:
+            values_list[0]
+            current_length = len(values_list)
+            if first_param:
+                expected_length = current_length
+                first_param = False
+            elif current_length != expected_length:
+                raise ValueError(f"Inconsistent lengths: '{param}' has length {current_length}, "
+                                    f"expected {expected_length}")
+
+        except TypeError:
+            raise TypeError(f"Subscriptable sequences are required for batch processing. "
+                            f"The '{param}' value '{values_list}' can not be used.")
+        except IndexError:
+            raise IndexError(f"'{param}' value is empty")
+
+    keys = list(kwargs.keys())
+    values = zip(*kwargs.values())
+
+    return [func(**dict(zip(keys, row))) for row in values]
+
+# Pandas functionality
 def check_monotonic_df(df: pd.DataFrame, col: str, interrupt: bool = False) -> int:
     """Check if a DataFrame column is monotonic.
 
@@ -124,7 +185,7 @@ def select_range_df(
         If the column is not monotonic or if parameters are invalid
     KeyError
         If data is DataFrame, and column not found
-        
+
     Notes:
     ------
     Supports open boundaries using NaN values:
@@ -144,7 +205,7 @@ def select_range_df(
     inclusive = _validate_option(inclusive, ['both', 'neither', 'left', 'right'], 'inclusive')
     handle_na = _validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
     left, right = _validate_val_range(val_range)
-    
+
     x = df[col].astype(float) # works x100 slower if dtype is pint
     # Handle NaN/inf values
     mask_na = x.isna() | x.isin([np.inf, -np.inf])
@@ -153,7 +214,7 @@ def select_range_df(
             raise ValueError("NaN or infinite values found in data")
         elif handle_na == 'exclude':
             df = df[~mask_na]
-    
+
     # Check if sequence is monotonic
     is_increasing = x.is_monotonic_increasing
     is_decreasing = x.is_monotonic_decreasing
@@ -206,7 +267,7 @@ def filter_range_df(
         If parameters are invalid or if NaN/inf found with handle_na='raise'
     KeyError
         If column not found in DataFrame
-    
+
     Notes:
     ------
     Supports open boundaries using NaN values:
@@ -226,7 +287,7 @@ def filter_range_df(
     left, right = _validate_val_range(val_range)
 
     values = df[col].astype(float)
-    
+
     # Handle NaN/inf values
     mask_na = values.isna() | values.isin([np.inf, -np.inf])
     if mask_na.any():
@@ -292,7 +353,7 @@ def filter_range_arr(
     ValueError
         If the column is not monotonic or if parameters are invalid
         If column is out bounds for array
-        
+
     Notes:
     ------
     Supports open boundaries using NaN values:
@@ -307,20 +368,20 @@ def filter_range_arr(
         raise TypeError("inside_range must be a boolean")
     inclusive = _validate_option(inclusive, ['both', 'neither', 'left', 'right'], 'inclusive')
     handle_na = _validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
-    
+
     mask_na = ~np.isfinite(x)
     if mask_na.any():
         if handle_na == 'raise':
             raise ValueError("NaN or infinite values found in data")
         elif handle_na == 'exclude':
             x = x[~mask_na].copy()
-    
+
     # Create range mask based on inclusive parameter
     mask = _create_range_mask(x, left, right, inclusive)
 
     # Apply inside_range logic
     mask = mask if inside_range else ~mask
-    
+
     return arr[mask & ~mask_na]
 
 def select_range_arr(
@@ -365,7 +426,7 @@ def select_range_arr(
     ValueError
         If the column is not monotonic or if parameters are invalid
         If column is out bounds for array
-        
+
     Notes:
     ------
     Supports open boundaries using NaN values:
@@ -380,7 +441,7 @@ def select_range_arr(
         raise TypeError("inside_range must be a boolean")
     inclusive = _validate_option(inclusive, ['both', 'neither', 'left', 'right'], 'inclusive')
     handle_na = _validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
-    
+
     mask_na = ~np.isfinite(x)
     if mask_na.any():
         if handle_na == 'raise':
@@ -390,10 +451,10 @@ def select_range_arr(
             x = x[~mask_na].copy()
     else:
         valid_indices = np.arange(len(arr))
-    
+
     # Check if column is monotonic
     is_monotonic = _check_monotonic_1darray(x) # returns 1, -1, 0 for increasing, decreasing and nonmonotonic
-    
+
     if not is_monotonic:
         raise ValueError(f"Column '{col}' must be monotonically increasing or decreasing")
 
@@ -446,27 +507,27 @@ def symmetric_range(lim, dx=1, *, sp=0, exclude_sp=False) -> np.ndarray:
 
     if lim == sp:
         raise ValueError("Limit cannot be equal to symmetry point")
-    
+
     lim_sym = -lim + 2 * sp
     lim_pos = lim if lim > lim_sym else lim_sym
     half1 = np.arange(sp, lim_pos + dx/2, dx)
     half1 = half1[half1 <= lim_pos]
-    
+
     if exclude_sp:
         half1 = half1[1:]
         half2 = -half1 + 2 * sp
     else:
         half2 = -half1[1::] + 2 * sp
-        
+
     return np.concatenate((half2[::-1], half1))
-    
-def symmetrize(seq: npt.ArrayLike) -> npt.ArrayLike: 
+
+def symmetrize(seq: npt.ArrayLike) -> npt.ArrayLike:
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     seq = np.asarray_chkfinite(seq)
     return (seq + seq[::-1]) / 2
 
-def antisymmetrize(seq: npt.ArrayLike) -> npt.ArrayLike: 
+def antisymmetrize(seq: npt.ArrayLike) -> npt.ArrayLike:
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     seq = np.asarray_chkfinite(seq)
@@ -477,8 +538,8 @@ def interpolate(
     y: npt.ArrayLike,
     x_new: npt.ArrayLike,
     *,
-    interp_method: Callable[[npt.ArrayLike, npt.ArrayLike, npt.ArrayLike], npt.ArrayLike] | None = None,
-    smooth_method: Callable[[npt.ArrayLike], npt.ArrayLike] | None = None,
+    interp: Callable[[npt.ArrayLike, npt.ArrayLike, npt.ArrayLike], npt.ArrayLike] | None = None,
+    smooth: Callable[[npt.ArrayLike], npt.ArrayLike] | None = None,
     handle_na: str = 'raise'
     ) -> np.ndarray:
     """
@@ -492,12 +553,16 @@ def interpolate(
         Original y coordinates.
     x_new : array_like
         Target x coordinates for interpolation.
-    interp_method : callable, optional
+    interp : callable, optional
         Custom interpolation function with signature f(x, y, x_new) -> y_new.
         If None, uses numpy.interp for linear interpolation.
-    smooth_method : callable, optional
+    smooth : callable, optional
         Smoothing function with signature f(y) -> y_smooth.
         If None, no smoothing is applied.
+    handle_na : str, default 'raise'
+        How to handle NaN/Inf values: 'exclude' or 'raise'.
+        If 'exclude', NaN/Inf excluded before range selecting. Returned data will not contain them.
+        Pre-filtering is recommended for more complex NA handling strategies
 
     Returns
     -------
@@ -522,23 +587,357 @@ def interpolate(
     x, y = _validate_xy(x, y, handle_na)
     x_new = np.asarray_chkfinite(x_new)
 
-    if interp_method is not None:
-        if not callable(interp_method):
-            raise ValueError("interp_method must be callable")
+    if interp is not None:
+        if not callable(interp):
+            raise ValueError("'interp' must be callable")
     else:
-        def interp_method(x, y, x_new): return np.interp(x_new, x, y)
+        def interp(x, y, x_new): return np.interp(x_new, x, y)
 
-    if smooth_method is not None and not callable(smooth_method):
-        raise ValueError("smooth_method must be callable")
+    if smooth is not None and not callable(smooth):
+        raise ValueError("'smooth' must be callable")
 
-    y_new = interp_method(x, y, x_new)
+    y_new = interp(x, y, x_new)
 
-    if smooth_method:
-        y_new = smooth_method(y_new)
+    if smooth:
+        y_new = smooth(y_new)
 
     return y_new
-        
-def normalize(y: npt.ArrayLike, by: str | float | int) -> np.ndarray:
+
+def savgol_filter(
+    array: npt.ArrayLike,
+    window: int,
+    order: int = 2,
+    edge_mode: str | Callable = 'fill_after',
+    fill_values: float | list[float, float] = np.nan,
+    deriv: int = 0,
+    delta: float = 1.0,
+    force_odd_window: bool = True,
+    align: str = 'center',
+    handle_nan: bool = False,
+    **kwargs
+    ) -> np.ndarray:
+    """
+    Calculate moving average with a centered window.
+
+    Parameters
+    ----------
+    array : array_like
+        Input array to process
+    window : int
+        The length of the filter window.
+        Correspond to window_length of scipy.signal.savgol_filter
+    order : int, default 2
+        The order of the polynomial used to fit the samples; must be less than window.
+        Correspond to polyorder of scipy.signal.savgol_filter
+    edge_mode : str or callable
+        Method to handle edges: 'fill_after', 'drop', 'repeat', or any numpy.pad mode
+    fill_values : float or list, default np.nan
+        Values for filling edges when appropriate
+    deriv : int, default 0
+        The order of the derivative to compute.
+        Correspond to deriv of scipy.signal.savgol_filter
+    delta : float, default 1.0
+        The spacing of the samples to which the filter will be applied.
+        Correspond to delta of scipy.signal.savgol_filter
+    force_odd_window : bool
+        If True, ensures window is odd-sized for proper centering
+    align : str, default 'center'
+        When window is even and force_odd_window is False, determines alignment:
+        'center-left', 'center-right', or 'center'
+    handle_nan : bool
+        If True, handles NaN values in the input array
+    **kwargs :
+        Additional arguments for numpy.pad
+
+    Returns
+    -------
+    np.ndarray
+        Moving average array of same size as input (unless edge_mode='drop')
+    """
+    # To implement padding and filtering on a lower level see links
+    # https://github.com/scipy/scipy/blob/v1.15.2/scipy/signal/_savitzky_golay.py#L230
+    # https://github.com/scipy/scipy/blob/v1.15.2/scipy/ndimage/_filters.py#L126
+
+    valid_pad_modes = ['constant', 'edge', 'linear_ramp',
+                      'maximum', 'mean', 'median', 'minimum',
+                      'reflect', 'symmetric', 'wrap', 'empty']
+    valid_modes = valid_pad_modes + ['interp', 'repeat', 'fill_after', 'drop']
+    valid_align = ['center', 'center-left', 'center-right']
+
+    # Input validation
+    if not isinstance(window, (int, np.integer)):
+        raise ValueError(f"'window' should be an integer type; got '{type(window)}'")
+    if window < 1:
+        raise ValueError(f"'window' must be at least 1; got {window}")
+    if edge_mode not in valid_modes and not callable(edge_mode):
+        raise ValueError(f"'edge_mode' got an invalid value '{edge_mode}'")
+    align = _validate_option(align, valid_align, 'align')
+
+    # Handle fill_values
+    if isinstance(fill_values, (str, bytes)):
+        raise ValueError("'fill_values' must be a number or an iterable of numbers, not a string or bytes")
+    elif not isinstance(fill_values, Iterable):
+        # Single number case
+        fill_values = [fill_values, fill_values]
+    else:
+        # Iterable case - convert to list for easier handling
+        fill_values = list(fill_values)
+        if len(fill_values) == 1:
+            fill_values = fill_values * 2
+        elif len(fill_values) != 2:
+            raise ValueError("'fill_values' as iterable should contain exactly 1 or 2 values; "
+                            f"got {len(fill_values)} values")
+
+        # Check that all values are numeric
+        if not all(isinstance(val, numbers.Number) for val in fill_values):
+            raise ValueError("All values in 'fill_values' must be numbers")
+
+    # Handle input array
+    if handle_nan:
+        array = np.asarray(array)
+        has_nan = np.isnan(array).any()
+    else:
+        array = np.asarray_chkfinite(array)
+        has_nan = False
+
+    # Validate array is 1D
+    if array.ndim != 1:
+        raise ValueError(f"Input array must be 1-dimensional; got {array.ndim} dimensions")
+
+    # Handle even/odd window sizes
+    if window % 2 == 0 and force_odd_window:
+        window = window + 1
+
+    # Determine padding amounts
+    if window % 2 == 0:  # Even window
+        if align == 'center-left':
+            left_pad = window // 2 - 1
+            right_pad = window // 2
+        elif align == 'center-right':
+            left_pad = window // 2
+            right_pad = window // 2 - 1
+        else:  # 'center'
+            # For exact center, symmetric padding
+            left_pad = right_pad = window // 2
+    else:  # Odd window
+        left_pad = right_pad = window // 2
+
+    if edge_mode == 'repeat':
+        edge_mode = _repeat_pad
+
+    # Handle NaN values if requested
+    if has_nan and handle_nan:
+        # Replace NaNs with local means or interpolated values
+        mask = np.isnan(array)
+        if np.all(mask):  # All values are NaN
+            return np.full_like(array, np.nan)
+
+        # Simple imputation
+        array_copy = array.copy()
+        array_copy[mask] = np.nanmean(array)  # Replace with mean
+        array = array_copy
+
+    # Pad array and apply Savitzky-Golay filter
+    if edge_mode in valid_pad_modes or callable(edge_mode):
+        # Use numpy's pad functionality
+        array_pad = np.pad(array, (left_pad, right_pad), mode=edge_mode, **kwargs)
+        result = scipy_savgol(array_pad, window_length=window, polyorder=order,
+                              deriv=deriv, delta=delta, mode='interp')
+        return result[left_pad:-right_pad]
+
+    # Apply Savitzky-Golay without padding
+    result = scipy_savgol(array, window_length=window, polyorder=order,
+                              deriv=deriv, delta=delta, mode='interp')
+    if edge_mode == 'interp':
+        return result
+
+    elif edge_mode == 'drop':
+        return result[left_pad:-right_pad]
+
+    elif edge_mode == 'fill_after':
+        # Compute only the valid part of convolution
+        result = scipy_savgol(array, window_length=window, polyorder=order,
+                              deriv=deriv, delta=delta, mode='interp')
+        # Fill edges with values
+        result[:left_pad] = fill_values[0]
+        result[-right_pad:] = fill_values[1]
+        return result
+
+    # Should never reach here due to earlier validation
+    raise ValueError(f"Unexpected 'edge_mode': {edge_mode}")
+
+def moving_average(
+    array: npt.ArrayLike,
+    window: int,
+    edge_mode: str | Callable = 'fill_after',
+    fill_values: float | list[float, float] = np.nan,
+    force_odd_window: bool = True,
+    align: str = 'center',
+    custom_kernel: np.ndarray | None = None,
+    handle_nan: bool = False,
+    **kwargs
+    ) -> np.ndarray:
+    """
+    Calculate moving average with a centered window.
+
+    Parameters
+    ----------
+    array : array_like
+        Input array to process
+    window : int
+        Size of the moving average window
+    edge_mode : str or callable
+        Method to handle edges: 'fill_after', 'drop', 'repeat', or any numpy.pad mode
+    fill_values : float or list, default np.nan
+        Values for filling edges when appropriate
+    force_odd_window : bool
+        If True, ensures window is odd-sized for proper centering
+    align : str
+        When window is even and force_odd_window is False, determines alignment:
+        'center-left', 'center-right', or 'center'
+    custom_kernel : array_like, optional
+        Optional custom kernel for weighted moving average. Will be normalized if sum != 1.0
+    handle_nan : bool
+        If True, handles NaN values in the input array
+    **kwargs :
+        Additional arguments for numpy.pad
+
+    Returns
+    -------
+    np.ndarray
+        Moving average array of same size as input (unless edge_mode='drop')
+
+    Examples
+    --------
+    # Simple moving average with default settings
+    >>> data = np.array([1, 2, 3, 4, 5])
+    >>> moving_average(data, 3)
+    array([0., 2., 3., 4., 0.])
+
+    # Custom Gaussian kernel
+    >>> from scipy.signal import gaussian
+    >>> gauss_kernel = gaussian(11, 2)
+    >>> moving_average(data, 11, custom_kernel=gauss_kernel, edge_mode='reflect')
+
+    # Even-sized window with specific alignment
+    >>> moving_average(data, 4, force_odd_window=False, align='center-right')
+    """
+    valid_pad_modes = ['constant', 'edge', 'linear_ramp',
+                      'maximum', 'mean', 'median', 'minimum',
+                      'reflect', 'symmetric', 'wrap', 'empty']
+    valid_modes = valid_pad_modes + ['repeat', 'fill_after', 'drop']
+    valid_align = ['center', 'center-left', 'center-right']
+
+    # Input validation
+    if not isinstance(window, (int, np.integer)):
+        raise ValueError(f"'window' should be an integer type; got '{type(window)}'")
+    if window < 1:
+        raise ValueError(f"'window' must be at least 1; got {window}")
+    if edge_mode not in valid_modes and not callable(edge_mode):
+        raise ValueError(f"'edge_mode' got an invalid value '{edge_mode}'")
+    align = _validate_option(align, valid_align, 'align')
+
+    # Handle fill_values
+    if isinstance(fill_values, (str, bytes)):
+        raise ValueError("'fill_values' must be a number or an iterable of numbers, not a string or bytes")
+    elif not isinstance(fill_values, Iterable):
+        # Single number case
+        fill_values = [fill_values, fill_values]
+    else:
+        # Iterable case - convert to list for easier handling
+        fill_values = list(fill_values)
+        if len(fill_values) == 1:
+            fill_values = fill_values * 2
+        elif len(fill_values) != 2:
+            raise ValueError("'fill_values' as iterable should contain exactly 1 or 2 values; "
+                            f"got {len(fill_values)} values")
+
+        # Check that all values are numeric
+        if not all(isinstance(val, numbers.Number) for val in fill_values):
+            raise ValueError("All values in 'fill_values' must be numbers")
+
+    # Handle input array
+    if handle_nan:
+        array = np.asarray(array)
+        has_nan = np.isnan(array).any()
+    else:
+        array = np.asarray_chkfinite(array)
+        has_nan = False
+
+    # Validate array is 1D
+    if array.ndim != 1:
+        raise ValueError(f"Input array must be 1-dimensional; got {array.ndim} dimensions")
+
+    # Handle even/odd window sizes
+    if window % 2 == 0 and force_odd_window:
+        window = window + 1
+
+    # Determine padding amounts
+    if window % 2 == 0:  # Even window
+        if align == 'center-left':
+            left_pad = window // 2 - 1
+            right_pad = window // 2
+        elif align == 'center-right':
+            left_pad = window // 2
+            right_pad = window // 2 - 1
+        else:  # 'center'
+            # For exact center, we'll use symmetric padding
+            left_pad = right_pad = window // 2
+    else:  # Odd window
+        left_pad = right_pad = window // 2
+
+    # Set up kernel
+    if custom_kernel is None:
+        kernel = np.ones(window) / window
+    else:
+        kernel = np.asarray(custom_kernel)
+        if len(kernel) != window:
+            raise ValueError(f"Custom kernel length ({len(kernel)}) must match window size ({window})")
+        # Normalize kernel if not already normalized
+        if not np.isclose(np.sum(kernel), 1.0):
+            kernel = kernel / np.sum(kernel)
+
+    if edge_mode == 'repeat':
+        edge_mode = _repeat_pad
+
+    # Handle NaN values if requested
+    if has_nan and handle_nan:
+        # Replace NaNs with local means or interpolated values
+        mask = np.isnan(array)
+        if np.all(mask):  # All values are NaN
+            return np.full_like(array, np.nan)
+
+        # Simple imputation
+        array_copy = array.copy()
+        array_copy[mask] = np.nanmean(array)  # Replace with mean
+        array = array_copy
+
+    # Apply the moving average based on edge mode
+    if edge_mode == 'drop':
+        return np.convolve(array, kernel, mode='valid')
+
+    if edge_mode in valid_pad_modes or callable(edge_mode):
+        # Use numpy's pad functionality
+        array_pad = np.pad(array, (left_pad, right_pad), mode=edge_mode, **kwargs)
+        result = np.convolve(array_pad, kernel, mode='valid')
+        return result
+
+    if edge_mode == 'fill_after':
+        # Compute only the valid part of convolution
+        valid_result = np.convolve(array, kernel, mode='valid')
+        result = np.empty_like(array)
+
+        # Place valid results in the appropriate position
+        result[left_pad:-right_pad] = valid_result
+
+        result[:left_pad] = fill_values[0]
+        result[-right_pad:] = fill_values[1]
+        return result
+
+    # Should never reach here due to earlier validation
+    raise ValueError(f"Unexpected 'edge_mode': {edge_mode}")
+
+def normalize(y: npt.ArrayLike, by: str | float ) -> np.ndarray:
     """Normalize array by specified value or method.
 
     Args:
@@ -552,7 +951,7 @@ def normalize(y: npt.ArrayLike, by: str | float | int) -> np.ndarray:
     if not y_arr.size:
         return y_arr
 
-    if isinstance(by, (int, float)):
+    if isinstance(by, numbers.Number):
         val_norm = by
     elif by == 'first':
         val_norm = y_arr[0]
@@ -562,7 +961,7 @@ def normalize(y: npt.ArrayLike, by: str | float | int) -> np.ndarray:
         val_norm = y_arr[-1]
     else:
         raise ValueError(f"Invalid normalization method: {by}")
-    
+
     if val_norm == 0:
         raise ValueError("Cannot normalize by zero")
     return y_arr / val_norm
@@ -575,11 +974,11 @@ def quick_fit(
     handle_na: str = 'raise'
     ) -> np.ndarray:
     """Quick polynomial/rational fitting using least squares.
-    
+
     Fits y = sum(c[i] * x^degrees[i]) where c[i] are the coefficients to find.
     Supports both standard polynomials and rational functions (negative degrees).
     No normalization is performed by design.
-    
+
     Args:
         x, y: array-like input data
         degrees: int or sequence of numbers, default=1
@@ -589,25 +988,25 @@ def quick_fit(
             Fit using only x values within this range inclusive
         handle_na : str, default 'raise'
             How to handle NaN/inf values: 'exclude' or 'raise'
-            
+
     Returns:
         ndarray: coefficients in ascending degree order if degrees is int,
                 or in same order as input degrees if sequence
-    
+
     Examples:
         >>> x = np.linspace(0, 1, 10)
         >>> y = 1 + 2*x  # linear function
         >>> quick_fit(x, y)  # returns approximately [1, 2]
-        
+
         >>> # Rational fit with terms x^-1 and x^1
         >>> quick_fit(x, y, degrees=[-1, 1])
     """
     handle_na = _validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
     MAX_SAFE_DEGREE = 5
-    
+
     # Convert inputs to arrays and validate
     x, y = _validate_xy(x, y, handle_na)
-    
+
     # Validate degrees
     degrees = np.asarray_chkfinite(degrees)
     if not (np.issubdtype(degrees.dtype, np.number) and np.isrealobj(degrees)):
@@ -617,38 +1016,38 @@ def quick_fit(
     if degrees.ndim > 1:
         raise ValueError("'degrees' must be 1-dimensional")
     if degrees.size == 1:
-        degrees = np.arange(degrees.astype(int) + 1)    
+        degrees = np.arange(degrees.astype(int) + 1)
     if len(np.unique(degrees)) != len(degrees):
         raise ValueError("Degrees must be unique")
-        
+
     if np.any(np.abs(degrees) > MAX_SAFE_DEGREE):
         warnings.warn(f"Degrees higher than {MAX_SAFE_DEGREE} may cause numerical instability")
-    
+
     # Validate and apply x_range
     if x_range:
         left, right = _validate_val_range(x_range)
         mask = (x >= left) & (x <= right)
         x, y = x[mask], y[mask]
-    
+
     # Check sufficient points
     n_points = len(x)
     n_coef = len(degrees)
-    
+
     if n_points < n_coef:
         raise ValueError(f"Need at least {n_coef} points for {n_coef} coefficients")
-    
+
     if n_points < 2:
         raise ValueError("Need at least 2 points for fitting")
-    
+
     # Check for zero/near-zero x values with negative degrees
     if any(d < 0 for d in degrees):
         min_abs_x = np.min(np.abs(x))
         if min_abs_x < 1e-10:
             raise ValueError("Near-zero x values detected with negative degrees")
-    
+
     # Create design matrix
     X = np.column_stack([x**d for d in degrees])
-    
+
     # Solve using lstsq
     coef = np.linalg.lstsq(X, y, rcond=None)[0]
     return coef
@@ -704,7 +1103,10 @@ def make_curve(
     X = np.column_stack([x**d for d in degrees])
     return X @ coefs
 
-def check_monotonic_arr(arr: np.ndarray, col: int | None, interrupt: bool = False) -> int:
+def check_monotonic_arr(arr: np.ndarray,
+                        col: int | None = None,
+                        interrupt: bool = False
+                        ) -> int:
     """Check if an array column is monotonic.
 
     Parameters
@@ -744,9 +1146,9 @@ def check_monotonic_arr(arr: np.ndarray, col: int | None, interrupt: bool = Fals
         raise ValueError(f"Column '{col}' is not monotonic")
     return is_monotonic
 
-def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike, 
+def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike,
                 x_range: npt.ArrayLike | None = None,
-                ddof: int = 0, 
+                ddof: int = 0,
                 handle_na: str = 'raise') -> float:
     """Evaluate standard deviation of the data approximating it with line.
 
@@ -786,13 +1188,13 @@ def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike,
     lin_approx = make_curve(x, coefs)
     # Using two degrees of freedom because we evaluated two parameters during linear fit
     return np.std(y - lin_approx, ddof=2 + ddof)
-       
+
 ## Secondary functions
 def get_mid_ind(seq: npt.ArrayLike)-> int:
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     return len(seq) // 2  # Use floor division
-    
+
 def get_mid_elem(seq: npt.ArrayLike) -> Any:
     if len(seq) == 0:
         raise ValueError("Sequence cannot be empty")
@@ -807,7 +1209,7 @@ def nonsym_points(sequence, *, split_point=0, atol=1e-8):
     indices = ~find_sym_points_indices(sequence, split_point, atol)
     seq = np.array(sequence, dtype=float)
     return seq[indices]
- 
+
 def find_sym_points_indices(sequence, split_point=0, atol=1e-8):
     seq = np.asarray_chkfinite(sequence, dtype=float)
     split_idx = np.searchsorted(seq, split_point)
@@ -829,11 +1231,20 @@ def find_sym_points_indices(sequence, split_point=0, atol=1e-8):
     match_idx = matches[has_match].argmax(axis=1)
     left_idx = np.nonzero(has_match)[0]
     right_idx = np.flip(match_idx + split_idx)
-    
+
     # Construct result array directly
     return np.sort(np.concatenate([left_idx, right_idx]))
 
 # Protected functions
+def _repeat_pad(vector, pad_width, iaxis, kwargs):
+    """
+    Custom method of padding for numpy.pad; repeats edge values.
+    """
+    width1, width2 = pad_width
+    vector[:width1] = vector[width1:2*width1]
+    vector[-width2:] = vector[-2*width2:-width2]
+    return vector
+
 def _validate_val_range(val_range: npt.ArrayLike) -> tuple[float, float]:
     """
     Validate and convert range input to a tuple of (left, right) bounds.
@@ -863,14 +1274,14 @@ def _validate_val_range(val_range: npt.ArrayLike) -> tuple[float, float]:
         # Convert to float/handle numeric types
         left = float(left) if not pd.isna(left) else -np.inf
         right = float(right) if not pd.isna(right) else np.inf
-        
+
         if left > right:
             left, right = right, left
         return (left, right)
 
     except TypeError:
         raise TypeError("Range values must be numeric or NaN")
-    
+
 def _validate_xy(x: npt.ArrayLike, y: npt.ArrayLike, handle_na: str = 'raise') -> tuple[np.ndarray, np.ndarray]:
     """Validate and preprocess x and y input arrays.
 
@@ -898,7 +1309,7 @@ def _validate_xy(x: npt.ArrayLike, y: npt.ArrayLike, handle_na: str = 'raise') -
     """
     # Convert inputs to arrays and validate
     x, y = np.asarray(x), np.asarray(y)
-    
+
     mask_na = np.isnan(x) | np.isnan(y) | np.isinf(x) | np.isinf(y)
     if mask_na.any():
         n_invalid = np.sum(mask_na)
@@ -906,13 +1317,13 @@ def _validate_xy(x: npt.ArrayLike, y: npt.ArrayLike, handle_na: str = 'raise') -
             raise ValueError(f"Found {n_invalid} NaN/Inf values in data")
         # handle_na == 'exclude'
         x, y = x[~mask_na], y[~mask_na]
-    
+
     if x.size == 0 or y.size == 0:
         raise ValueError("Input arrays cannot be empty")
-    
+
     if x.shape != y.shape:
         raise ValueError("x and y must have same shape")
-        
+
     if x.ndim != 1:
         raise ValueError("x and y must be 1-dimensional")
     return x, y
@@ -1028,7 +1439,7 @@ def _create_range_mask(x: np.ndarray, left: float, right: float, inclusive: str)
         return (x >= left) & (x < right)
     else:  # 'right'
         return (x > left) & (x <= right)
-    
+
 def _validate_option(value, allowed_values, param_name):
     """
     Validate if a value is among allowed options.
@@ -1061,5 +1472,5 @@ def _validate_option(value, allowed_values, param_name):
     """
     if value not in allowed_values:
         options_str = "', '".join(str(v) for v in allowed_values)
-        raise ValueError(f"{param_name} must be one of: '{options_str}'")
+        raise ValueError(f"'{param_name}' must be one of: '{options_str}'")
     return value

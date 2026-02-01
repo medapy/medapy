@@ -25,6 +25,9 @@ fit = [
 plot = [
   "matplotlib>=3.10",
 ]
+test = [
+  "pytest>=8.0",
+]
 all = ["medapy[fit, plot]"]
 
 [tool.setuptools_scm]
@@ -33,7 +36,7 @@ all = ["medapy[fit, plot]"]
 where = ["src"]
 
 [project.urls]
-Homepage = "https://github.com/razorgecko/medapy"
+Homepage = "https://github.com/medapy/medapy"
 
 # authors = [
 #   { name="example", email="example" },

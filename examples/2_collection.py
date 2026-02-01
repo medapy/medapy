@@ -9,7 +9,7 @@ def print_files(fs, n, header=None, end=None):
     if header:
         print(header)
         print('-'*len(header))
-    
+
     if isinstance(fs, MeasurementCollection):
         fs_len = len(fs)
         fs.head(n)
@@ -17,14 +17,14 @@ def print_files(fs, n, header=None, end=None):
         for (i, f) in enumerate(fs):
             if i < n:
                 print(f'{i:2}: {f.path.name}')
-            
+
         fs_len = i + 1
     print(f'Total number of elements: {fs_len}')
     if end:
         print('-'*len(end))
         print(end)
     print()
-    
+
 # Create parameter definitions inside code
 # example:
 #   long_names: [name1, name2]
@@ -34,7 +34,7 @@ def print_files(fs, n, header=None, end=None):
 #     value_name1: value1
 #     value_name2: value
 #   patterns:
-#     fixed: "{SNAME}--{VALUE}{UNIT}" 
+#     fixed: "{SNAME}--{VALUE}{UNIT}"
 #     sweep: "{LNAME}sweep|sweep{LNAME}"
 #     range: "{NAME}{VALUE}to{VALUE}{UNIT}"
 
@@ -59,11 +59,38 @@ temp_param = ParameterDefinition(
 )
 
 # Create test measurement file representation
-testname = "sample_V1-5(1e-3A)_V3-7_V2-8_V4_V6_I11_sweepField_B-14to14T_T=3.0K_date.csv"
+testname = "sample_V1-5(1e-3V)_V3-7_V2-8_V4_V6_I11_sweepField_B-14to14T_T=3.0K_date.csv"
 testfile = MeasurementFile(testname, parameters=[field_param, temp_param])
 
-# Print states of parameters parsed from testname 
-print(*list(map(str, testfile.parameters.values())), sep='\n', end='\n\n')
+testname2 = "sample_I1-5(1e-6A)_V3-7_V2-7_V4_V7_I12_sweepField_B-14to14T_T=3.0K_date.csv"
+testfile2 = MeasurementFile(testname2, parameters=[field_param, temp_param])
+
+# Make a copy
+testcopy = testfile.copy()
+
+# Path of the file can be modified without affectint it's parameters
+# This can be useful to save a file to another path
+# All parameters are optional
+testcopy.rename(directory='~', name='newname',
+                prefix='sample', postfix='date', sep='_', ext='dat')
+print(testcopy.path)
+
+# Merge two files
+# If strict mode, checks that parameters of files are equal
+merged = testfile.merge(testfile2, strict_mode=True)
+print(merged.path)
+
+# Merged file has filename generated from contacts and parameters
+# Use rename method to add prefix and postfix
+# merged.rename(prefix='sample', postfix='date')
+
+# Generate filename based on contacts configuration and parameters
+# To change separator between name parts, use 'sep' parameter
+f = merged.generate_filename(prefix='sample', postfix='merged')
+print(f)
+
+# Print states of parameters parsed from testname
+print(*list(map(repr, testfile.parameters.values())), sep='\n', end='\n\n')
 
 # Load default parameter definitions
 parameters = DefinitionsLoader().get_all()
@@ -147,9 +174,12 @@ print_files(files_V2_6, n=5, header='Contact pair 2-6')
 
 # Filter contact pair with particular polarization
 pair = ContactPair(1, 5, 'I', 1e-6) # create contact pair I1-5(1uA)
-# Alternatively it can be created by parsing a string
-# pair = ContactPair()
-# pair.parse_contacts('I1-5(1uA)')
+# Alternatively it can be created by parsing a string or tuple
+# pair = ContactPair.make_from('I1-5(1uA)')
+# pair = ContactPair.make_from((1, 5, 'I', 1e-6))
+# Integer or tuple[2] can be used to have a single contact/pair without polarization
+# pair = ContactPair.make_from(1)
+# pair = ContactPair.make_from((1, 5))
 files_1uA = collection.filter_generator(contacts=pair)
 print_files(files_1uA, n=5, header='Contact pair 1-5, I=1uA')
 
@@ -157,7 +187,7 @@ print_files(files_1uA, n=5, header='Contact pair 1-5, I=1uA')
 files_specific = collection.filter_generator(
     contacts=[pair, (3, 7)],
     polarization='current',
-    sweep_direction='inc', 
+    sweep_direction='inc',
     temperature=(2, 10),
     position=[45, 'IP'],
 )

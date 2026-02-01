@@ -8,7 +8,6 @@ dist/
 # Implement later
 superconductivity/
 decide_later/
-tests/
 
 # Docs site
 site/
@@ -16,5 +15,20 @@ site/
 # Internal TODO/notes
 _internal_todo.md
 
+# Local environment
+# Virtual environment
+.venv/
+.zed/
+
+# Implementation scratches
+scratch/
+
 # Packages installed in environment
 recs.txt
+requirements.txt
+
+# Language server project config
+pyrightconfig.json
+
+# Claude Code files
+CLAUDE.md

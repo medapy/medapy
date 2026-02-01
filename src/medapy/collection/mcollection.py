@@ -3,16 +3,16 @@ from pathlib import Path
 
 from medapy.collection import (MeasurementFile,
                                ParameterDefinition)
-                               
+from medapy.utils import validations
 
 class MeasurementCollection:
-    def __init__(self, 
+    def __init__(self,
                  collection: str | Path | Iterable[MeasurementFile],
                  parameters: Iterable[ParameterDefinition],
                  file_pattern: str = "*.*",
                  separator: str = "_"):
-        
-        self._verify_class_in_iterable(parameters, ParameterDefinition, iter_name='parameters')
+
+        validations.class_in_iterable(parameters, ParameterDefinition, iter_name='parameters')
         self.param_definitions = {param.name_id: param for param in parameters}
         self.separator = separator
 
@@ -27,22 +27,22 @@ class MeasurementCollection:
             if not collection:
                 self.files = []
                 return
-            self._verify_class_in_iterable(collection, MeasurementFile, iter_name='collection')
+            validations.class_in_iterable(collection, MeasurementFile, iter_name='collection')
             self.files = list(collection)
             return
         raise ValueError("collection can be str, Path, or Iterable; "
                          f"got {type(collection)}")
-    
+
     def __iter__(self) -> Iterator[MeasurementFile]:
         """Iterate over all measurement files"""
         return iter(self.files)
-    
+
     def __copy__(self):
         """Create a shallow copy of the object"""
         # Create new instance of the same class
         return self.__class__(collection=self.files.copy(),
                               parameters=list(self.param_definitions.values()))
-    
+
     def __add__(self, other):
         """Enable addition with another Collection or list"""
         if isinstance(other, MeasurementCollection):
@@ -51,7 +51,7 @@ class MeasurementCollection:
             return MeasurementCollection(collection=files,
                                          parameters=parameters)
         raise TypeError(f"Cannot add {type(other)} to MeasurementCollection")
-    
+
     def __len__(self):
         """Return the number of files in collection"""
         return len(self.files)
@@ -69,7 +69,7 @@ class MeasurementCollection:
             return (self.files == other.files and
                     self.param_definitions == other.param_definitions)
         return super().__eq__(other)
-    
+
     def __setitem__(self, index, value):
         """Enable item assignment"""
         if not isinstance(value, MeasurementFile):
@@ -95,7 +95,7 @@ class MeasurementCollection:
             res += f"\n{'..':2}    {'...':^8}\n"
             res += self._tail_files_str(5)
         return res
-    
+
     # def __repr__(self):
     #     """Detailed string representation"""
     #     res = self.__get_repr_header()
@@ -107,11 +107,16 @@ class MeasurementCollection:
     #         res += f'{'..':2}    {'...':^8}\n'
     #         res += self._tail_files_str(5)
     #     return res
-            
-    def filter_generator(self, 
+
+    def filter_generator(self,
                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
                polarization: str | None = None,
-               sweep_direction: str | None = None,
+               sweeps: list[str] | str | None = None,
+               sweep_directions: list[str | None] | str | None = None,
+               exact_sweeps: bool = True,
+               name_contains: list[str] | str | None = None,
+               exclude: bool = False,
+               mode: str = 'all',
                **parameter_filters) -> Iterator[MeasurementFile]:
         """
         Filter measurement files based on various criteria, returning a generator
@@ -119,42 +124,97 @@ class MeasurementCollection:
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
             polarization: 'I' for current or 'V' for voltage
-            sweep_direction: 'up' or 'down'
+            sweep_directions: 'inc' or 'dec'
+            exclude: If True, exclude files that match criteria instead of including them
+            mode: 'all' for AND logic (default), 'any' for OR logic
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
             Iterator of matching MeasurementFile instances
         """
         for meas_file in self.files:
-            if meas_file.check(
-                contacts, 
-                polarization, 
-                sweep_direction, 
+            matches = meas_file.check(
+                mode=mode,
+                contacts=contacts,
+                polarization=polarization,
+                sweeps=sweeps,
+                sweep_directions=sweep_directions,
+                exact_sweep=exact_sweeps,
+                name_contains=name_contains,
                 **parameter_filters
-            ):
+            )
+            if matches != exclude:
                 yield meas_file
 
     def filter(self,
                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
                polarization: str | None = None,
-               sweep_direction: str | None = None,
+               sweeps: list[str] | str | None = None,
+               sweep_directions: list[str | None] | str | None = None,
+               exact_sweeps: bool = True,
+               name_contains: list[str] | str | None = None,
+               exclude: bool = False,
                **parameter_filters) -> 'MeasurementCollection':
         """
         Filter measurement files based on various criteria, returning a new collection
+        Uses AND logic - files must match ALL criteria
 
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
             polarization: 'I' for current or 'V' for voltage
-            sweep_direction: 'up' or 'down'
+            sweep_direction: 'inc' or 'dec'
+            exclude: If True, exclude files that match criteria instead of including them
             **parameter_filters: Parameter name with value or (min, max) tuple
 
         Returns:
             New MeasurementCollection containing only matching files
         """
         filtered_files = list(self.filter_generator(
-            contacts,
-            polarization,
-            sweep_direction,
+            contacts=contacts,
+            polarization=polarization,
+            sweeps=sweeps,
+            sweep_directions=sweep_directions,
+            exact_sweeps=exact_sweeps,
+            name_contains=name_contains,
+            exclude=exclude,
+            mode='all',
+            **parameter_filters
+        ))
+        return MeasurementCollection(
+            filtered_files,
+            parameters=self.param_definitions.values(),
+            separator=self.separator
+        )
+
+    def exclude(self,
+                contacts: Union[Tuple[int, int], list[Union[Tuple[int, int], int]], int] = None,
+                polarization: str | None = None,
+                sweeps: list[str] | str | None = None,
+                sweep_directions: list[str | None] | str | None = None,
+                exact_sweeps: bool = True,
+                name_contains: list[str] | str | None = None,
+                **parameter_filters) -> 'MeasurementCollection':
+        """
+        Exclude measurement files that match ANY of the given criteria (OR logic)
+
+        Args:
+            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
+            polarization: 'I' for current or 'V' for voltage
+            sweep_directions: 'inc' or 'dec'
+            **parameter_filters: Parameter name with value or (min, max) tuple
+
+        Returns:
+            New MeasurementCollection excluding files that match ANY criterion
+        """
+        filtered_files = list(self.filter_generator(
+            contacts=contacts,
+            polarization=polarization,
+            sweeps=sweeps,
+            sweep_directions=sweep_directions,
+            exact_sweeps=exact_sweeps,
+            name_contains=name_contains,
+            exclude=True,
+            mode='any',
             **parameter_filters
         ))
         return MeasurementCollection(
@@ -167,60 +227,55 @@ class MeasurementCollection:
         files = sorted(self.files, key=lambda f: tuple(f.state_of(p).value for p in parameters))
         return type(self)(collection=files.copy(),
                           parameters=list(self.param_definitions.values()))
-    
+
     def copy(self):
         return self.__copy__()
-    
+
     def append(self, item) -> None:
         """Add a file to collection"""
         if not isinstance(item, MeasurementFile):
             raise TypeError("Can only append MeasurementFile objects")
         self.files.append(item)
-    
+
     def extend(self, iterable: Iterable) -> None:
         """Extend collection from iterable"""
-        self._verify_class_in_iterable(iterable, MeasurementFile, iter_name='iterable')
+        validations.class_in_iterable(iterable, MeasurementFile, iter_name='iterable')
         self.files.extend(iterable)
-    
+
     def pop(self, index: int = -1):
         """
         Remove and return item at index (default last).
         Raises IndexError if collection is empty or index is out of range.
         """
         return self.files.pop(index)
-    
+
     def head(self, n: int = 5) -> None:
         header = self.__get_repr_header()
         print(header + self._head_files_str(n))
-    
+
     def tail(self, n: int = 5) -> None:
         header = self.__get_repr_header()
         print(header + self._tail_files_str(n))
-    
+
     def to_list(self):
         return self.files.copy()
-    
-    @staticmethod
-    def _verify_class_in_iterable(iterable, class_obj, iter_name):
-        if not all(isinstance(item, class_obj) for item in iterable):
-            raise TypeError(f"All items in {iter_name} must be {class_obj.__name__} objects")
-    
+
     def __get_repr_header(self):
         return f"{'':2}    Filename\n"
-    
+
     def _head_files_str(self, n: int) -> str:
         head = ''
         for (i, f) in enumerate(self.files[:n]):
             head += f'{i:>2}    {f.path.name}\n'
         return head.rstrip('\n')
-    
+
     def _tail_files_str(self, n: str) -> str:
         tail = ''
         ref_idx = len(self.files) - n
         for (i, f) in enumerate(self.files[-n:]):
             tail += f'{ref_idx + i:>2}    {f.path.name}\n'
         return tail.rstrip('\n')
-    
+
 # Drafts/templates
     # def group_by(self, attribute: str) -> dict[str, list[MeasurementFile]]:
     #     """Group files by given attribute"""

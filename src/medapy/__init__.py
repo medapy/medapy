@@ -8,7 +8,7 @@ pint.set_application_registry(ureg)
 
 __all__ = ['ureg']
 __all__ .extend(['MeasurementCollection',
-                 'MeasurementFile', 
+                 'MeasurementFile',
                  'ParameterDefinition',
                  'DefinitionsLoader',
                  'Parameter',
