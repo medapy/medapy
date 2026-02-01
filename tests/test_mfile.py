@@ -398,6 +398,87 @@ class TestMeasurementFileParameterMethods:
         assert temp.state.min_val == Decimal('1.8')
         assert temp.state.max_val == Decimal('300')
 
+    def test_state_of(self, mfile):
+        """Test getting parameter state."""
+        state = mfile.state_of("temperature")
+        assert state.value == 4.2
+        assert isinstance(state.value, float)
+        assert state.is_swept is False
+
+    def test_value_of_fixed_parameter(self, mfile):
+        """Test getting value from fixed parameter."""
+        value = mfile.value_of("temperature")
+        assert value == 4.2
+        assert isinstance(value, float)
+
+    def test_value_of_swept_parameter(self):
+        """Test that swept parameter returns None."""
+        loader = DefinitionsLoader()
+        mfile = MeasurementFile(
+            path="sample_B-14to14T_T=4.2K.csv",
+            parameters=loader.get_all()
+        )
+        # Magnetic field is swept
+        value = mfile.value_of("magnetic_field")
+        assert value is None
+
+        # Temperature is fixed
+        temp_value = mfile.value_of("temperature")
+        assert temp_value == 4.2
+
+    def test_value_of_nonexistent_parameter(self, mfile):
+        """Test that getting value of non-existent parameter raises ValueError."""
+        with pytest.raises(ValueError, match="not defined for file"):
+            mfile.value_of("nonexistent")
+
+    def test_range_of_fixed_parameter(self, mfile):
+        """Test that fixed parameter returns None."""
+        # Temperature is fixed at 4.2K
+        range_val = mfile.range_of("temperature")
+        assert range_val is None
+
+    def test_range_of_swept_increasing(self):
+        """Test getting range from swept parameter with increasing direction."""
+        loader = DefinitionsLoader()
+        # B-14to14T is increasing sweep
+        mfile = MeasurementFile(
+            path="sample_B-14to14T_T=4.2K.csv",
+            parameters=loader.get_all()
+        )
+        range_val = mfile.range_of("magnetic_field")
+        assert range_val == (-14.0, 14.0)
+        assert isinstance(range_val[0], float)
+        assert isinstance(range_val[1], float)
+
+    def test_range_of_swept_decreasing(self):
+        """Test that decreasing sweep preserves (start, end) order."""
+        loader = DefinitionsLoader()
+        # Create file with decreasing sweep (14 to -14)
+        mfile = MeasurementFile(
+            path="sample_B14to-14T_T=4.2K.csv",
+            parameters=loader.get_all()
+        )
+        range_val = mfile.range_of("magnetic_field")
+        # Should return (start, end) = (14.0, -14.0), not (min, max)
+        assert range_val == (14.0, -14.0)
+
+    def test_range_of_swept_undefined(self):
+        """Test swept parameter with undefined bounds."""
+        loader = DefinitionsLoader()
+        # sweepField without range
+        mfile = MeasurementFile(
+            path="sample_sweepField_T=4.2K.csv",
+            parameters=loader.get_all()
+        )
+        range_val = mfile.range_of("magnetic_field")
+        # Undefined sweep returns None (no range available)
+        assert range_val is None
+
+    def test_range_of_nonexistent_parameter(self, mfile):
+        """Test that getting range of non-existent parameter raises ValueError."""
+        with pytest.raises(ValueError, match="not defined for file"):
+            mfile.range_of("nonexistent")
+
 
 class TestMeasurementFileIntegration:
     """Integration tests with realistic filenames."""

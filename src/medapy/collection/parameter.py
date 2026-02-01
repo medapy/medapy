@@ -353,7 +353,10 @@ class ParameterState(NamedTuple):
 
     @property
     def range(self) -> tuple[float, float] | None:
-        if self.is_swept:
+        if self.is_swept and self.min is not None and self.max is not None:
+            # Return (start, end) preserving sweep direction
+            if self.sweep_direction == SweepDirection.DECREASING:
+                return (self.max, self.min)
             return (self.min, self.max)
         return None
 

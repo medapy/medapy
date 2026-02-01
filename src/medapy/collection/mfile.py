@@ -8,7 +8,7 @@ from pathlib import Path
 from decimal import Decimal
 from typing import Iterable
 
-from .parameter import ParameterDefinition, DefinitionsLoader, Parameter, ParameterState
+from .parameter import ParameterDefinition, DefinitionsLoader, Parameter, ParameterState, SweepDirection
 from medapy.utils import validations
 
 
@@ -654,6 +654,76 @@ class MeasurementFile:
     def state_of(self, name: str) -> ParameterState:
         param = self.get_parameter(name)
         return ParameterState.from_state(param.state)
+
+    def value_of(self, name: str) -> float | None:
+        """
+        Get the value of a fixed parameter.
+
+        Args:
+            name: Parameter name
+
+        Returns:
+            Parameter value for fixed parameters, None for swept parameters
+
+        Raises:
+            ValueError: If parameter is not defined for this file
+
+        Examples:
+            >>> file = MeasurementFile(...)
+            >>> temp = file.value_of('temperature')  # Get fixed parameter value
+            >>> field = file.value_of('field')  # Returns None if field is swept
+        """
+        param = self.get_parameter(name)
+        if param.state.is_swept:
+            return None
+        return float(param.state.value) if param.state.value is not None else None
+
+    def range_of(self, name: str) -> tuple[float, float] | None:
+        """
+        Get the range of a swept parameter.
+
+        Returns (start, end) values preserving the sweep direction from the filename.
+        For example, "B14to-14T" returns (14.0, -14.0), not (-14.0, 14.0).
+
+        Args:
+            name: Parameter name
+
+        Returns:
+            Tuple of (start, end) for swept parameters with defined range,
+            None for fixed parameters or swept parameters with undefined range.
+
+        Raises:
+            ValueError: If parameter is not defined for this file
+
+        Examples:
+            >>> file = MeasurementFile(...)
+            >>> # From "B-14to14T" (increasing sweep)
+            >>> file.range_of('magnetic_field')  # Returns (-14.0, 14.0)
+            >>> # From "B14to-14T" (decreasing sweep)
+            >>> file.range_of('magnetic_field')  # Returns (14.0, -14.0)
+            >>> # From "T=4.2K" (fixed parameter)
+            >>> file.range_of('temperature')  # Returns None
+            >>> # From "sweepField" (undefined sweep)
+            >>> file.range_of('magnetic_field')  # Returns None
+        """
+        param = self.get_parameter(name)
+        if not param.state.is_swept:
+            return None
+
+        min_val = param.state.min_val
+        max_val = param.state.max_val
+
+        # Return None if range is undefined
+        if min_val is None or max_val is None:
+            return None
+
+        # Convert to float and return (start, end) preserving sweep direction
+        min_val = float(min_val)
+        max_val = float(max_val)
+
+        if param.state.sweep_direction == SweepDirection.DECREASING:
+            return (max_val, min_val)
+        return (min_val, max_val)
 
     def add_contacts(
         self,
