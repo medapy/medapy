@@ -44,6 +44,58 @@ contact_pattern = re.compile(
 
 @dataclass(frozen=True)
 class ContactPair:
+    """
+    Immutable representation of an electrical contact pair configuration.
+
+    Stores contact numbers, polarization type (current/voltage), and magnitude.
+    Used for identifying and filtering measurement files by contact configuration.
+
+    Parameters
+    ----------
+    first_contact : int
+        First contact number (required).
+    second_contact : int, optional
+        Second contact number. None for single-contact measurements.
+    polarization : PolarizationType or str, optional
+        Polarization type: 'I' for current, 'V' for voltage.
+        Accepts string or PolarizationType enum.
+    magnitude : Decimal, float, int, or str, optional
+        Polarization magnitude. Automatically converted to Decimal.
+
+    Attributes
+    ----------
+    first_contact : int
+        First contact number.
+    second_contact : int or None
+        Second contact number, or None for single contacts.
+    polarization : PolarizationType or None
+        Polarization type (CURRENT or VOLTAGE).
+    magnitude : Decimal or None
+        Polarization magnitude.
+
+    Examples
+    --------
+    >>> # Create contact pair with current polarization
+    >>> pair = ContactPair(1, 5, 'I', 10e-6)  # I1-5(10uA)
+    >>> # Single contact
+    >>> single = ContactPair(3)
+    >>> # Voltage polarization
+    >>> vpair = ContactPair(2, 6, 'V', 1e-3)  # V2-6(1mV)
+    >>> # String representation
+    >>> str(pair)  # 'I1-5(1.0e-05A)'
+    >>> # Parsing from string
+    >>> parsed = ContactPair.from_string("I1-5(10uA)")
+    >>> # Progressive matching
+    >>> pair.pair_matches((1, 5))  # True (matches contacts)
+    >>> pair.pair_matches((1, 5, 'I'))  # True (matches contacts + polarization)
+
+    See Also
+    --------
+    make_from : Create ContactPair from various input formats
+    from_string : Parse from string representation
+    pair_matches : Progressive matching based on input type
+    contacts_match : Match only contact numbers
+    """
     # For single contact, second_contact will be None
     first_contact: int | None = None
     second_contact: int | None = None
@@ -63,20 +115,46 @@ class ContactPair:
         """
         Create ContactPair from various input formats.
 
-        Args:
-            data: Contact specification
-                - int: single contact (e.g., 1)
-                - tuple[2]: (first_contact, second_contact)
-                - tuple[3]: (first_contact, second_contact, polarization)
-                - tuple[4]: (first_contact, second_contact, polarization, magnitude)
-                - str: string representation (e.g., "I1-2(2uA)", "V3-4", "1")
-                - ContactPair: returns as-is
+        Parameters
+        ----------
+        data : int, tuple, str, or ContactPair
+            Contact specification:
+            - int: single contact (e.g., 1)
+            - tuple[2]: (first_contact, second_contact)
+            - tuple[3]: (first_contact, second_contact, polarization)
+            - tuple[4]: (first_contact, second_contact, polarization, magnitude)
+            - str: string representation (e.g., "I1-2(2uA)", "V3-4", "1")
+            - ContactPair: returns as-is
 
-        Returns:
-            ContactPair instance
+        Returns
+        -------
+        ContactPair
+            ContactPair instance created from input.
 
-        Raises:
-            ValueError: If invalid input type or string parsing fails
+        Raises
+        ------
+        ValueError
+            If invalid input type or string parsing fails, or if tuple
+            length is greater than 4.
+
+        Examples
+        --------
+        >>> # From integer (single contact)
+        >>> ContactPair.make_from(1)
+        >>> # From tuple
+        >>> ContactPair.make_from((1, 5))
+        >>> ContactPair.make_from((1, 5, 'I'))
+        >>> ContactPair.make_from((1, 5, 'I', 10e-6))
+        >>> # From string
+        >>> ContactPair.make_from("I1-5(10uA)")
+        >>> ContactPair.make_from("V2-6")
+        >>> # From existing ContactPair (pass-through)
+        >>> pair = ContactPair(1, 5)
+        >>> ContactPair.make_from(pair)  # Returns same instance
+
+        See Also
+        --------
+        from_string : Parse specifically from string
         """
         # ContactPair: pass through
         if isinstance(data, ContactPair):
@@ -302,6 +380,60 @@ class ContactPair:
 
 @dataclass(frozen=False)
 class MeasurementFile:
+    """
+    Represents a measurement file with automatic parameter extraction from filename.
+
+    Parses filenames to extract measurement parameters (temperature, field, etc.) and
+    contact pair configurations. Provides filtering and state access methods.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the measurement file.
+    parameters : list of ParameterDefinition or Parameter, or Path or str
+        Either a list of parameter definition/instances, or path to parameter
+        definitions file (JSON).
+    separator : str, default "_"
+        Character used to separate filename parts.
+
+    Attributes
+    ----------
+    path : Path
+        Path to the measurement file.
+    parameters : dict of {str : Parameter}
+        Parsed parameters from filename, keyed by parameter name_id.
+    contact_pairs : list of ContactPair
+        Contact configurations extracted from filename.
+    separator : str
+        Filename parts separator.
+
+    Examples
+    --------
+    >>> from medapy.collection import MeasurementFile, DefinitionsLoader
+    >>> # Create file with parameter parsing
+    >>> parameters = DefinitionsLoader().get_all()
+    >>> mfile = MeasurementFile(
+    ...     "sample_V1-5(1mV)_B-14to14T_T=3K.csv",
+    ...     parameters=parameters
+    ... )
+    >>> # Access parsed values
+    >>> temp = mfile.value_of('temperature')  # Returns 3.0
+    >>> field_range = mfile.range_of('magnetic_field')  # Returns (-14.0, 14.0)
+    >>> # Check file properties
+    >>> has_voltage = mfile.check(polarization='V')
+    >>> low_temp = mfile.check(temperature=(0, 5))
+
+    See Also
+    --------
+    MeasurementCollection : Manage collections of measurement files
+    ParameterDefinition : Define parameter schemas
+    ContactPair : Represent contact pair configurations
+
+    Notes
+    -----
+    The filename is automatically parsed on initialization to extract parameters
+    and contact pairs based on the provided parameter definitions.
+    """
     path: Path
     parameters: dict[str, Parameter]
     contact_pairs: list[ContactPair]
@@ -314,12 +446,29 @@ class MeasurementFile:
         separator: str = "_",
     ):
         """
-        Initialize MeasurementFile
+        Initialize MeasurementFile with automatic filename parsing.
 
-        Args:
-            path: Path to the measurement file
-            parameters: Either a list of Parameter instances or path to parameter definitions file
-            separator: Filename parts separator
+        Parameters
+        ----------
+        path : str or Path
+            Path to the measurement file.
+        parameters : list of ParameterDefinition or Parameter, or Path or str
+            Parameter definitions for parsing. Can be:
+            - List of ParameterDefinition objects
+            - List of Parameter instances (copies parameters directly)
+            - Path to parameter definitions JSON file
+            - String path to parameter definitions JSON file
+        separator : str, default "_"
+            Character used to separate parts in the filename.
+
+        Examples
+        --------
+        >>> from medapy.collection import MeasurementFile, DefinitionsLoader
+        >>> # Using default parameter definitions
+        >>> params = DefinitionsLoader().get_all()
+        >>> mfile = MeasurementFile("data_T=4K.csv", parameters=params)
+        >>> # Using custom parameter definitions file
+        >>> mfile = MeasurementFile("data_T=4K.csv", parameters="custom_params.json")
         """
         self.path = Path(path)
         self.separator = separator
@@ -366,21 +515,62 @@ class MeasurementFile:
         **parameter_filters: dict,
     ) -> bool:
         """
-        Check if file matches filter conditions with configurable logic
+        Check if file matches filter conditions with configurable logic.
 
-        Args:
-            mode: 'all' for AND logic (default), 'any' for OR logic
-            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3, "I1-2"],
-                     single contact, string ("I1-2(2uA)"), or ContactPair instance
-            polarization: 'I' for current or 'V' for voltage
-            sweeps: Sweep parameter(s) to match
-            sweep_directions: 'inc', 'dec', or None
-            exact_sweep: Whether to match sweep ranges exactly
-            name_contains: String(s) or regex pattern(s) that must appear in filename
-            **parameter_filters: Parameter name with value or (min, max) tuple
+        Parameters
+        ----------
+        mode : {'all', 'any'}, default 'all'
+            Logic mode: 'all' requires all criteria to match (AND logic),
+            'any' requires at least one criterion to match (OR logic).
+        contacts : various types, optional
+            Contact specification to match:
+            - int: single contact (e.g., 1)
+            - tuple: contact pair (e.g., (1, 2), (1, 2, 'I'), or (1, 2, 'I', 1e-6))
+            - str: string representation (e.g., "I1-2(2uA)")
+            - ContactPair: full contact pair object
+            - list: multiple contact specifications
+        polarization : {'I', 'V'}, optional
+            'I' for current polarization or 'V' for voltage polarization.
+        sweeps : str or list of str, optional
+            Parameter name(s) that should be swept.
+        sweep_directions : {'inc', 'dec'} or list, optional
+            Expected sweep direction(s): 'inc' for increasing, 'dec' for decreasing.
+        exact_sweep : bool, default True
+            If True, sweep ranges must match exactly. If False, file's sweep
+            range must be contained within the specified range.
+        name_contains : str or list of str, optional
+            String(s) or regex pattern(s) that must appear in filename.
+        **parameter_filters : keyword arguments
+            Filter by parameter values. Use parameter name as key with:
+            - Single value: checks for exact match (fixed parameters)
+            - Tuple (min, max): checks if value is in range
+            - Suffix '_sweep': checks for swept parameters with the given range
 
-        Returns:
-            bool: True if criteria match according to mode
+        Returns
+        -------
+        bool
+            True if file matches criteria according to the specified mode.
+
+        Examples
+        --------
+        >>> # Check for voltage polarization at low temperature
+        >>> mfile.check(polarization='V', temperature=(0, 5))
+        >>> # Check for field sweep with increasing direction
+        >>> mfile.check(sweeps='magnetic_field', sweep_directions='inc')
+        >>> # Check for specific contacts
+        >>> mfile.check(contacts=(1, 5))
+        >>> mfile.check(contacts='I1-5(10mA)')
+        >>> # Use OR logic (any criterion matches)
+        >>> mfile.check(mode='any', temperature=4.2, magnetic_field=0)
+        >>> # Check filename contains pattern
+        >>> mfile.check(name_contains='sample.*_run1')
+
+        See Also
+        --------
+        check_contacts : Check only contact configuration
+        check_sweep : Check only sweep parameters
+        check_parameter : Check individual parameter
+        MeasurementCollection.filter : Filter collection using check criteria
         """
 
         def _check_generator():

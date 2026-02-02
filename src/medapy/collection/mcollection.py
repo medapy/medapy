@@ -6,11 +6,101 @@ from medapy.collection import (MeasurementFile,
 from medapy.utils import validations
 
 class MeasurementCollection:
+    """
+    Manage and filter collections of measurement files.
+
+    Provides methods to filter files by measurement parameters, contact configurations,
+    and other criteria. Supports iteration, slicing, and collection operations.
+
+    Parameters
+    ----------
+    collection : str, Path, or iterable of MeasurementFile
+        Source of measurement files:
+        - str or Path: directory path to scan for files
+        - iterable: existing collection of MeasurementFile objects
+    parameters : iterable of ParameterDefinition
+        Parameter definitions used to parse filenames.
+    file_pattern : str, default "*.*"
+        Glob pattern for matching files in directory (used only if collection is a path).
+    separator : str, default "_"
+        Separator character used in filenames.
+
+    Attributes
+    ----------
+    files : list of MeasurementFile
+        List of measurement files in the collection.
+    param_definitions : dict
+        Parameter definitions keyed by name_id.
+    separator : str
+        Filename separator character.
+    folder_path : Path, optional
+        Path to the folder if collection was created from directory.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> from medapy.collection import MeasurementCollection, DefinitionsLoader
+    >>> # Load default parameter definitions
+    >>> parameters = DefinitionsLoader().get_all()
+    >>> # Create collection from directory
+    >>> path = Path('examples/files')
+    >>> collection = MeasurementCollection(path, parameters)
+    >>> # Explore collection
+    >>> collection.head(5)  # Show first 5 files
+    >>> len(collection)  # Number of files
+    >>> # Filter by criteria
+    >>> low_temp_files = collection.filter(temperature=(2, 5))
+    >>> current_sweep = collection.filter(sweeps='magnetic_field',
+    ...                                    polarization='I')
+    >>> # Iterate over files
+    >>> for mfile in collection:
+    ...     print(mfile.name)
+
+    See Also
+    --------
+    MeasurementFile : Individual measurement file representation
+    filter : Filter collection by criteria
+    filter_generator : Generator version of filter
+    ParameterDefinition : Define parameter schemas
+    """
     def __init__(self,
                  collection: str | Path | Iterable[MeasurementFile],
                  parameters: Iterable[ParameterDefinition],
                  file_pattern: str = "*.*",
                  separator: str = "_"):
+        """
+        Initialize measurement collection from directory or file list.
+
+        Parameters
+        ----------
+        collection : str, Path, or iterable of MeasurementFile
+            Source of measurement files:
+            - Directory path (str or Path): scans for files matching file_pattern
+            - Iterable of MeasurementFile: uses provided file objects
+        parameters : iterable of ParameterDefinition
+            Parameter definitions for parsing filenames. All items must be
+            ParameterDefinition instances.
+        file_pattern : str, default "*.*"
+            Glob pattern for file matching when collection is a directory path.
+            Examples: "*.csv", "*.dat", "*_T=*K.txt"
+        separator : str, default "_"
+            Character used to separate filename parts for parsing.
+
+        Examples
+        --------
+        >>> from pathlib import Path
+        >>> from medapy.collection import MeasurementCollection, DefinitionsLoader
+        >>> # From directory
+        >>> params = DefinitionsLoader().get_all()
+        >>> collection = MeasurementCollection(
+        ...     Path('data/measurements'),
+        ...     parameters=params,
+        ...     file_pattern="*.csv"
+        ... )
+        >>> # From existing file list
+        >>> files = [mfile1, mfile2, mfile3]
+        >>> collection = MeasurementCollection(files, parameters=params)
+        """
 
         validations.class_in_iterable(parameters, ParameterDefinition, iter_name='parameters')
         self.param_definitions = {param.name_id: param for param in parameters}
@@ -119,18 +209,60 @@ class MeasurementCollection:
                mode: str = 'all',
                **parameter_filters) -> Iterator[MeasurementFile]:
         """
-        Filter measurement files based on various criteria, returning a generator
+        Filter measurement files based on criteria, yielding results lazily.
 
-        Args:
-            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
-            polarization: 'I' for current or 'V' for voltage
-            sweep_directions: 'inc' or 'dec'
-            exclude: If True, exclude files that match criteria instead of including them
-            mode: 'all' for AND logic (default), 'any' for OR logic
-            **parameter_filters: Parameter name with value or (min, max) tuple
+        Supports both AND logic (all criteria must match) and OR logic (any criterion
+        must match) via the mode parameter. Memory-efficient for large collections.
 
-        Returns:
-            Iterator of matching MeasurementFile instances
+        Parameters
+        ----------
+        contacts : various types, optional
+            Contact specification (int, tuple, str, ContactPair, or list).
+        polarization : {'I', 'V'}, optional
+            Filter by polarization type.
+        sweeps : str or list of str, optional
+            Parameter name(s) that should be swept.
+        sweep_directions : {'inc', 'dec'} or list, optional
+            Expected sweep direction(s).
+        exact_sweeps : bool, default True
+            If True, sweep ranges must match exactly.
+        name_contains : str or list of str, optional
+            String(s) or regex pattern(s) that must appear in filename.
+        exclude : bool, default False
+            If True, exclude files matching criteria instead of including them.
+        mode : {'all', 'any'}, default 'all'
+            Logic mode:
+            - 'all': AND logic - files must match ALL criteria
+            - 'any': OR logic - files must match AT LEAST ONE criterion
+        **parameter_filters : keyword arguments
+            Filter by parameter values.
+
+        Yields
+        ------
+        MeasurementFile
+            Files matching the filter criteria.
+
+        Examples
+        --------
+        >>> # AND logic (all criteria must match)
+        >>> for mfile in collection.filter_generator(
+        ...     polarization='I',
+        ...     temperature=(2, 5),
+        ...     mode='all'
+        ... ):
+        ...     print(mfile.name)
+        >>> # OR logic (any criterion matches)
+        >>> for mfile in collection.filter_generator(
+        ...     temperature=4.2,
+        ...     magnetic_field=0,
+        ...     mode='any'
+        ... ):
+        ...     print(mfile.name)
+
+        See Also
+        --------
+        filter : Returns MeasurementCollection (AND logic only)
+        exclude : Excludes files matching ANY criterion (OR logic)
         """
         for meas_file in self.files:
             matches = meas_file.check(
@@ -195,16 +327,54 @@ class MeasurementCollection:
                 name_contains: list[str] | str | None = None,
                 **parameter_filters) -> 'MeasurementCollection':
         """
-        Exclude measurement files that match ANY of the given criteria (OR logic)
+        Exclude files matching ANY of the given criteria (OR logic).
 
-        Args:
-            contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
-            polarization: 'I' for current or 'V' for voltage
-            sweep_directions: 'inc' or 'dec'
-            **parameter_filters: Parameter name with value or (min, max) tuple
+        Unlike filter() which uses AND logic, this method excludes files that match
+        any single criterion. Useful for removing unwanted files from collection.
 
-        Returns:
-            New MeasurementCollection excluding files that match ANY criterion
+        Parameters
+        ----------
+        contacts : various types, optional
+            Contact specification to exclude.
+        polarization : {'I', 'V'}, optional
+            Exclude files with this polarization type.
+        sweeps : str or list of str, optional
+            Exclude files sweeping these parameters.
+        sweep_directions : {'inc', 'dec'} or list, optional
+            Exclude files with these sweep directions.
+        exact_sweeps : bool, default True
+            If True, sweep ranges must match exactly.
+        name_contains : str or list of str, optional
+            Exclude files with these strings/patterns in filename.
+        **parameter_filters : keyword arguments
+            Exclude files matching these parameter values.
+
+        Returns
+        -------
+        MeasurementCollection
+            New collection excluding files that match ANY criterion (OR logic).
+
+        Examples
+        --------
+        >>> # Exclude files at zero field OR at 4.2K
+        >>> subset = collection.exclude(
+        ...     magnetic_field=0,
+        ...     temperature=4.2
+        ... )
+        >>> # File excluded if field=0 OR temp=4.2 (not both required)
+        >>> # Exclude voltage polarization files
+        >>> current_only = collection.exclude(polarization='V')
+
+        Notes
+        -----
+        This method uses OR logic: a file is excluded if it matches ANY of the
+        specified criteria. To exclude files matching ALL criteria, use:
+        ``collection.filter(..., exclude=True)`` instead.
+
+        See Also
+        --------
+        filter : Include files matching ALL criteria (AND logic)
+        filter_generator : Generator with configurable AND/OR logic
         """
         filtered_files = list(self.filter_generator(
             contacts=contacts,

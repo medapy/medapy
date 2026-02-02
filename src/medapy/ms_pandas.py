@@ -37,6 +37,59 @@ def update_column_names(func):
 
 @pd.api.extensions.register_dataframe_accessor("ms")
 class MeasurementSheetAccessor:
+    """
+    Pandas accessor for measurement sheets with unit-aware functionality.
+
+    This accessor (`.ms`) provides specialized methods for working with measurement
+    data, including unit handling via Pint, column labeling, and axis management.
+
+    The measurement sheet paradigm treats DataFrames as collections of physical
+    measurements where each column has:
+    - A unit (handled via Pint)
+    - Optional labels for convenient access
+    - Optional axis assignment (x, y, z, or custom)
+
+    Attributes
+    ----------
+    axes : dict
+        Mapping of axis names to column names {'x': col1, 'y': col2, ...}
+    units : dict
+        Mapping of column names to their units {'col1': 'meter', ...}
+    labels : dict
+        Mapping of labels to column names {'label': 'column', ...}
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from medapy import ms_pandas
+    >>> # Create DataFrame with units in column names
+    >>> df = pd.DataFrame({
+    ...     'Field (T)': [0, 1, 2],
+    ...     'Resistance (Ohm)': [100, 105, 110]
+    ... })
+    >>> # Initialize measurement sheet
+    >>> df.ms.init_msheet(translations={'Ohm': 'ohm'})
+    >>> # Add labels for convenient access
+    >>> df.ms.add_labels({'Field': 'H', 'Resistance': 'R'})
+    >>> # Access data by label
+    >>> field = df.ms['H']
+    >>> # Convert units
+    >>> df.ms.convert_unit('H', 'mT')
+    >>> # Get data with units for calculations
+    >>> resistance = df.ms.wu('R')  # Returns pint-typed series
+
+    See Also
+    --------
+    init_msheet : Initialize the measurement sheet with axes and units
+    add_labels : Add label mappings to columns
+    set_as_axis : Assign columns to named axes
+    convert_unit : Convert column to different units
+
+    Notes
+    -----
+    The accessor must be initialized with `init_msheet()` before use. This sets up
+    unit parsing, axis assignments, and other metadata.
+    """
     DEFAULT_UNIT_PATTERN = re.compile(r'.*(\(([^\(\)]*)\)|\[([^\[\]]*)\]|\{([^\{\}]*)\})(?!.*[\(\[\{].*[\)\]\}])')
     DEFAULT_UNIT_BRACKETS = '[]'
     DEFAULT_TRANSLATIONS = {}
@@ -63,7 +116,37 @@ class MeasurementSheetAccessor:
             self._obj.attrs['_ms_translations'] = self.DEFAULT_TRANSLATIONS
 
     def __getitem__(self, key: str | list[str]) -> pd.Series | pd.DataFrame:
-        """Get column(s) by label(s) or column name(s) using square bracket notation."""
+        """
+        Get column(s) by label(s) or column name(s) using square bracket notation.
+
+        Parameters
+        ----------
+        key : str or list of str
+            Column name, label, or list of column names/labels to retrieve.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Series with unit information if single column requested,
+            DataFrame if multiple columns requested.
+
+        Raises
+        ------
+        KeyError
+            If key is neither a valid column name nor a label.
+
+        Examples
+        --------
+        >>> df.ms.add_labels({'Field': 'H', 'Resistance': 'R'})
+        >>> field = df.ms['H']  # Access by label
+        >>> resistance = df.ms['Resistance']  # Access by column name
+        >>> subset = df.ms[['H', 'R']]  # Multiple columns
+
+        See Also
+        --------
+        add_labels : Add label mappings to columns
+        get_column : Get original column name from label
+        """
         # Multiple keys
         if isinstance(key, list):
             columns = [self._labels.get(k, k) for k in key]
@@ -85,7 +168,34 @@ class MeasurementSheetAccessor:
         return pd.Series(self._obj[column].to_numpy(), name=new_name)
 
     def __setitem__(self, key: str, value) -> None:
-        """Set column(s) by label(s) or column name(s) using square bracket notation."""
+        """
+        Set column values by label or column name using square bracket notation.
+
+        Parameters
+        ----------
+        key : str
+            Column name or label to set values for.
+        value : array-like or scalar
+            Values to assign. Must match the length of the measurement sheet.
+            Can be a pandas Series with pint dtype for automatic unit handling.
+
+        Raises
+        ------
+        ValueError
+            If value length doesn't match measurement sheet length,
+            or if units conflict with existing units in strict mode.
+
+        Notes
+        -----
+        - Accepts pint-typed arrays and automatically extracts units
+        - For new columns, sets unit to dimensionless by default
+        - Unit conflicts are checked if strict_units mode is enabled
+
+        Examples
+        --------
+        >>> df.ms['R'] = [1, 2, 3]  # Set by column name or label
+        >>> df.ms['V'] = pd.Series([0.1, 0.2, 0.3], dtype='pint[V]')  # With units
+        """
         # Single key only yet
         column = self._labels.get(key, key)
 
@@ -620,7 +730,44 @@ class MeasurementSheetAccessor:
                      to_unit: Union[str, pint.Unit],
                      contexts: str | list[str] | None = None
                      ) -> None:
-        """Convert column data to different unit."""
+        """
+        Convert column data to different units in place.
+
+        Both the values and the unit metadata are updated. This differs from
+        set_unit() which only changes the unit label without converting values.
+
+        Parameters
+        ----------
+        column : str
+            Column name or label to convert.
+        to_unit : str or pint.Unit
+            Target unit for conversion.
+        contexts : str or list of str, optional
+            Pint context(s) to enable for conversion. For example, 'Gaussian'
+            context is required to convert between tesla and oersted.
+
+        Raises
+        ------
+        ValueError
+            If unit conversion is not possible (incompatible dimensions).
+        pint.DimensionalityError
+            If units have incompatible dimensions.
+
+        Examples
+        --------
+        >>> # Simple conversion
+        >>> df.ms.convert_unit('H', 'T')
+        >>> # With context for electromagnetic units
+        >>> df.ms.convert_unit('H', 'Oe', contexts='Gaussian')
+        >>> # Multiple contexts
+        >>> df.ms.convert_unit('energy', 'eV', contexts=['spectroscopy', 'boltzmann'])
+
+        See Also
+        --------
+        set_unit : Change unit label without converting values
+        convert_ms_units : Convert all columns at once
+        init_msheet : Initialize with unit contexts
+        """
         column = self.get_column(column)
         unit = self.get_unit(column)
         unit = ureg(unit)
@@ -734,7 +881,40 @@ class MeasurementSheetAccessor:
             self.set_unit(col, None)
 
     def wu(self, name: str) -> pd.Series:
-        """Get column values as series with pint unit"""
+        """
+        Get column values as series with pint units ('wu' = 'with units').
+
+        Parameters
+        ----------
+        name : str
+            Column name or label to retrieve with units.
+
+        Returns
+        -------
+        pd.Series
+            Series with pint dtype containing values and unit information.
+
+        Raises
+        ------
+        RuntimeError
+            If pint_pandas module is not loaded.
+        KeyError
+            If name is neither a valid column nor label.
+
+        Examples
+        --------
+        >>> # Get columns with units for calculations
+        >>> current = df.ms.wu('I')  # Returns pint-typed series
+        >>> voltage = df.ms.wu('V')
+        >>> conductance = current / voltage  # Units handled automatically
+        >>> df.ms['Conductance'] = conductance  # Units preserved
+
+        See Also
+        --------
+        __getitem__ : Get column without pint dtype wrapper
+        set_unit : Set unit for a column
+        get_unit : Get unit of a column
+        """
         if 'sys' not in sys.modules:
             raise RuntimeError("Required module 'pint_pandas' is not loaded")
 
@@ -764,6 +944,33 @@ class MeasurementSheetAccessor:
             raise KeyError(f"'{name}' is neither a label nor a column")
 
     def rename(self, columns: dict[str, str]) -> None:
+        """
+        Rename columns while preserving metadata (labels, axes, units).
+
+        Parameters
+        ----------
+        columns : dict of {str : str}
+            Mapping of old column names to new column names.
+
+        Raises
+        ------
+        ValueError
+            If new column names conflict with existing labels.
+
+        Examples
+        --------
+        >>> df.ms.rename({'Resistance': 'Resistance_xx'})
+        >>> df.ms.rename({'Field': 'MagneticField', 'Current': 'I'})
+
+        Notes
+        -----
+        All metadata (labels, axes, units) are automatically updated to
+        reference the new column names.
+
+        See Also
+        --------
+        rename_label : Rename a label instead of a column
+        """
         # Check for conflicts with labels
         invalid_columns = self._get_nonuniques_with_counts(columns.values(), self.labels)
         if invalid_columns:
@@ -773,6 +980,43 @@ class MeasurementSheetAccessor:
         self._update_column_maps(columns)
 
     def add_labels(self, labels: dict[str, str]) -> None:
+        """
+        Add label mappings to columns for convenient access.
+
+        Parameters
+        ----------
+        labels : dict of {str : str or list of str}
+            Mapping of column names to label(s). Each column can have
+            multiple labels by providing a list of strings.
+
+        Raises
+        ------
+        ValueError
+            If column names don't exist in the DataFrame, or if labels
+            conflict with existing column names.
+
+        Examples
+        --------
+        >>> # Add single labels
+        >>> df.ms.add_labels({
+        ...     'Field': 'H',
+        ...     'Resistance': 'R',
+        ...     'Voltage': 'V'
+        ... })
+        >>> # Add multiple labels per column
+        >>> df.ms.add_labels({
+        ...     'Field': ['H', 'B', 'field']
+        ... })
+        >>> # Access using labels
+        >>> field = df.ms['H']
+
+        See Also
+        --------
+        add_label : Add a single label to a column
+        rename_label : Rename an existing label
+        remove_label : Remove a label mapping
+        get_labels : Get all labels assigned to a column
+        """
         invalid_cols = set(labels.keys()) - set(self._obj.columns)
         if invalid_cols:
             raise ValueError(f"Invalid column names: {', '.join(invalid_cols)}")
@@ -943,6 +1187,52 @@ class MeasurementSheetAccessor:
                *,
                drop_x: bool = True
                ) -> pd.DataFrame:
+        """
+        Concatenate measurement sheets horizontally, preserving metadata.
+
+        Parameters
+        ----------
+        objs : pd.DataFrame or list of pd.DataFrame
+            DataFrame(s) to concatenate with the current measurement sheet.
+        drop_x : bool, default True
+            If True, drop the x-axis column from concatenated DataFrames to
+            avoid duplication (assumes they share the same x-axis).
+
+        Returns
+        -------
+        pd.DataFrame
+            New DataFrame with combined columns and merged metadata.
+
+        Raises
+        ------
+        ValueError
+            If column names or labels have duplicates across DataFrames.
+
+        Examples
+        --------
+        >>> # Read and initialize separate measurements
+        >>> xx = pd.read_csv('resistance_xx.csv')
+        >>> xy = pd.read_csv('resistance_xy.csv')
+        >>> xx.ms.init_msheet()
+        >>> xy.ms.init_msheet()
+        >>> # Rename to avoid conflicts
+        >>> xx.ms.rename({'Resistance': 'R_xx'})
+        >>> xy.ms.rename({'Resistance': 'R_xy'})
+        >>> # Concatenate, sharing the x-axis
+        >>> data = xx.ms.concat(xy)
+        >>> # Multiple DataFrames
+        >>> data = df1.ms.concat([df2, df3, df4])
+
+        Notes
+        -----
+        - Labels and units from all DataFrames are merged
+        - If drop_x=True, only the x-axis from the first DataFrame is kept
+        - Ensures no duplicate column names or labels exist
+
+        See Also
+        --------
+        pandas.concat : Standard pandas concatenation
+        """
         if isinstance(objs, pd.DataFrame):
             objs = [objs]
         if drop_x:

@@ -10,6 +10,51 @@ from medapy.utils import misc
 
 @pd.api.extensions.register_dataframe_accessor("proc")
 class DataProcessingAccessor():
+    """
+    Pandas accessor for data processing operations on measurement sheets.
+
+    Provides methods for common data transformations including monotonicity
+    enforcement, range selection, normalization, symmetrization, and interpolation.
+    All methods support in-place or copy-based operation via the `inplace` parameter.
+
+    Attributes
+    ----------
+    ms : MeasurementSheetAccessor
+        Access to the underlying measurement sheet accessor.
+    x, y, z : pd.Series
+        Quick access to axis data.
+    col_x, col_y, col_z : str
+        Column names for x, y, z axes.
+
+    Examples
+    --------
+    >>> from medapy import ms_pandas
+    >>> from medapy.analysis import proc_pandas
+    >>> import pandas as pd
+    >>> # Create and initialize measurement sheet
+    >>> df = pd.DataFrame({'Field (T)': [2, 1, 0, -1, -2],
+    ...                    'Resistance (Ohm)': [100, 101, 102, 101, 100]})
+    >>> df.ms.init_msheet(translations={'Ohm': 'ohm'})
+    >>> # Ensure monotonic increasing
+    >>> df.proc.ensure_increasing(inplace=True)
+    >>> # Select range
+    >>> subset = df.proc.select_range((-1, 1), inplace=False)
+    >>> # Normalize data
+    >>> df.proc.normalize(by='mid', append='norm', inplace=True)
+    >>> # Symmetrize for magnetic field measurements
+    >>> df.proc.symmetrize(cols='Resistance', append='sym', inplace=True)
+
+    Notes
+    -----
+    The `.proc` accessor requires the measurement sheet to be initialized with
+    `.ms.init_msheet()` first. All methods preserve measurement sheet metadata
+    (units, labels, axes) through operations.
+
+    See Also
+    --------
+    MeasurementSheetAccessor : Core measurement sheet functionality
+    ElectricalTransportAccessor : Specialized electrical transport analysis
+    """
 
     def __init__(self, pandas_obj):
         self._validate(pandas_obj)
@@ -58,6 +103,43 @@ class DataProcessingAccessor():
         return check
 
     def ensure_increasing(self, inplace=False):
+        """
+        Ensure x-axis data is monotonically increasing.
+
+        If data is monotonically decreasing, reverses the entire DataFrame order.
+        Raises an error if data is not monotonic.
+
+        Parameters
+        ----------
+        inplace : bool, default False
+            If True, modify the DataFrame in place and return None.
+            If False, return a modified copy.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Modified DataFrame if inplace=False, None otherwise.
+
+        Raises
+        ------
+        ValueError
+            If x-axis column is not monotonic (neither increasing nor decreasing).
+
+        Examples
+        --------
+        >>> # Data with decreasing x-axis
+        >>> df = pd.DataFrame({'x': [3, 2, 1], 'y': [10, 20, 30]})
+        >>> df.ms.init_msheet()
+        >>> df.proc.ensure_increasing(inplace=True)
+        >>> df['x'].tolist()  # Now [1, 2, 3]
+        [1, 2, 3]
+        >>> df['y'].tolist()  # Order reversed
+        [30, 20, 10]
+
+        See Also
+        --------
+        check_monotonic : Check monotonicity without modification
+        """
         # Work on a copy of the data
         df = self._get_df_copy()
 
@@ -79,6 +161,43 @@ class DataProcessingAccessor():
                      handle_na: str = 'raise',
                      inplace: bool = False
                      ) -> pd.DataFrame | None:
+        """
+        Select data within or outside a specified x-axis range.
+
+        Parameters
+        ----------
+        val_range : array-like of length 2
+            Range boundaries (min, max) for selection. Order doesn't matter.
+        inside_range : bool, default True
+            If True, select data inside the range. If False, select data outside.
+        inclusive : {'both', 'left', 'right', 'neither'}, default 'both'
+            Whether to include boundary values.
+        handle_na : {'raise', 'exclude'}, default 'raise'
+            How to handle NaN/Inf values in x-axis:
+            - 'raise': raise error if NaN/Inf found
+            - 'exclude': exclude NaN/Inf before selection
+        inplace : bool, default False
+            If True, modify the DataFrame in place.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Selected DataFrame if inplace=False, None otherwise.
+
+        Examples
+        --------
+        >>> # Select data in range
+        >>> subset = df.proc.select_range((-1, 3), inplace=False)
+        >>> # Select data outside range
+        >>> edges = df.proc.select_range((0, 10), inside_range=False)
+        >>> # Exclude right boundary
+        >>> left_only = df.proc.select_range((0, 1), inclusive='left')
+
+        See Also
+        --------
+        filter_range : Alternative implementation
+        interpolate : Interpolate to specific x values
+        """
         # Work on a copy of the data
         df = self._get_df_copy()
         # Get DataFrame with selected range
