@@ -439,6 +439,10 @@ def detect_min_precision(value: float, max_decimals: int = 3) -> int:
     """
     Detect the minimum number of decimal places needed to represent a value.
 
+    Uses an optimized modulo-based approach: converts the value to an integer
+    representation and checks divisibility by powers of 10 to determine the
+    minimum precision needed.
+
     Parameters
     ----------
     value : float
@@ -453,18 +457,24 @@ def detect_min_precision(value: float, max_decimals: int = 3) -> int:
 
     Examples
     --------
-    >>> _detect_min_precision(100.0)
+    >>> detect_min_precision(100.0)
     0
-    >>> _detect_min_precision(100.5)
+    >>> detect_min_precision(100.5)
     1
-    >>> _detect_min_precision(100.123)
+    >>> detect_min_precision(100.123)
     3
     """
+    # Convert to integer representation by shifting decimal point
+    multiplier = 10 ** max_decimals
+    scaled = round(value * multiplier)
+
+    # Check divisibility by decreasing powers of 10
+    # If divisible, we can represent with fewer decimal places
     for decimals in range(max_decimals + 1):
-        # Check if rounding to this many decimals preserves the value
-        # (within floating point tolerance)
-        if round(value, decimals) == round(value, max_decimals):
+        divisor = 10 ** (max_decimals - decimals)
+        if scaled % divisor == 0:
             return decimals
+
     return max_decimals
 
 
