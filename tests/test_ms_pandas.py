@@ -63,7 +63,7 @@ class TestMeasurementSheetUnitParsing:
         df.ms.init_msheet()
 
         df.ms.set_unit('Field', ureg.tesla)
-        assert df.ms.get_unit('Field') == 'tesla'
+        assert df.ms.get_unit('Field') == 'T'
 
 
 class TestMeasurementSheetAxes:
@@ -587,3 +587,261 @@ class TestMeasurementSheetAxisShortcuts:
 
         assert df.ms.axes['y'] == 'Field'
         assert df.ms.axes['x'] == 'Resistance'
+
+
+class TestDimensionlessColumns:
+    """Test handling of dimensionless columns."""
+
+    def test_dimensionless_empty_brackets(self):
+        """Test column with empty brackets is treated as dimensionless."""
+        df = pd.DataFrame({
+            'Field [T]': [0, 1, 2, 3],
+            'Ratio []': [1.0, 2.0, 3.0, 4.0],
+        })
+        df.ms.init_msheet()
+
+        assert 'Field' in df.columns
+        assert 'Ratio' in df.columns
+        assert df.ms.get_unit('Field') == 'T'
+        assert df.ms.get_unit('Ratio') == '1'  # Dimensionless
+
+    def test_dimensionless_au(self):
+        """Test column with [a.u.] is treated as dimensionless."""
+        df = pd.DataFrame({
+            'Intensity [a.u.]': [1.0, 2.0, 3.0],
+            'Signal [a. u.]': [4.0, 5.0, 6.0],
+        })
+        df.ms.init_msheet()
+
+        assert 'Intensity' in df.columns
+        assert 'Signal' in df.columns
+        assert df.ms.get_unit('Intensity') == '1'
+        assert df.ms.get_unit('Signal') == '1'
+
+    def test_dimensionless_no_brackets(self):
+        """Test column without brackets defaults to dimensionless."""
+        df = pd.DataFrame({
+            'Count': [1, 2, 3],
+            'Index': [0, 1, 2],
+        })
+        df.ms.init_msheet()
+
+        assert df.ms.get_unit('Count') == '1'
+        assert df.ms.get_unit('Index') == '1'
+
+    def test_mixed_dimensionless_and_units(self):
+        """Test DataFrame with mix of dimensionless and unit-bearing columns."""
+        df = pd.DataFrame({
+            'Field [T]': [0, 1, 2],
+            'Ratio []': [1.0, 1.5, 2.0],
+            'Count': [10, 20, 30],
+            'Voltage [V]': [5.0, 10.0, 15.0],
+        })
+        df.ms.init_msheet()
+
+        assert df.ms.get_unit('Field') == 'T'
+        assert df.ms.get_unit('Ratio') == '1'
+        assert df.ms.get_unit('Count') == '1'
+        assert df.ms.get_unit('Voltage') == 'V'
+
+
+class TestDuplicateColumnHandling:
+    """Test handling of duplicate base names with different units."""
+
+    def test_duplicates_with_suffix(self):
+        """Test handle_duplicates='suffix' adds unit-based suffixes."""
+        df = pd.DataFrame({
+            'Voltage [V]': [1.0, 2.0, 3.0],
+            'Voltage [mV]': [1000, 2000, 3000],
+            'Field [T]': [0, 1, 2],
+        })
+        df.ms.init_msheet()  # Default is handle_duplicates='suffix'
+
+        # Should have suffixes for duplicates
+        assert 'Voltage_V' in df.columns
+        assert 'Voltage_mV' in df.columns
+        assert 'Field' in df.columns  # No duplicate, no suffix
+
+        # Units should be correct
+        assert df.ms.get_unit('Voltage_V') == 'V'
+        assert df.ms.get_unit('Voltage_mV') == 'mV'
+        assert df.ms.get_unit('Field') == 'T'
+
+    def test_duplicates_with_preserve(self):
+        """Test handle_duplicates='preserve' keeps original names when duplicates exist."""
+        df = pd.DataFrame({
+            'I [mA]': [1, 2, 3],
+            'I [A]': [0.001, 0.002, 0.003],
+        })
+        df.ms.init_msheet(units=False)
+        df.ms.infer_ms_units(handle_duplicates='preserve')
+
+        # Original names with brackets should be preserved (because duplicates exist)
+        assert 'I [mA]' in df.columns
+        assert 'I [A]' in df.columns
+
+        # Units should be correct
+        assert df.ms.get_unit('I [mA]') == 'mA'
+        assert df.ms.get_unit('I [A]') == 'A'
+
+    def test_duplicates_with_mangle(self):
+        """Test handle_duplicates='mangle' uses pandas-style numeric suffixes."""
+        df = pd.DataFrame({
+            'Current [mA]': [1, 2, 3],
+            'Current [A]': [0.001, 0.002, 0.003],
+            'Current [uA]': [1000, 2000, 3000],
+        })
+        df.ms.init_msheet(units=False)
+        df.ms.infer_ms_units(handle_duplicates='mangle')
+
+        # Should have numeric suffixes
+        assert 'Current' in df.columns
+        assert 'Current.1' in df.columns
+        assert 'Current.2' in df.columns
+
+        # Units should be correct (first column gets no suffix)
+        assert df.ms.get_unit('Current') == 'mA'
+
+    def test_duplicates_with_error(self):
+        """Test handle_duplicates='error' raises ValueError when duplicates exist."""
+        df = pd.DataFrame({
+            'Voltage [V]': [1.0, 2.0],
+            'Voltage [mV]': [1000, 2000],
+        })
+        df.ms.init_msheet(units=False)
+
+        with pytest.raises(ValueError, match="duplicate column names"):
+            df.ms.infer_ms_units(handle_duplicates='error')
+
+    def test_no_duplicates_all_modes(self):
+        """Test that ALL modes strip units when there are no duplicates.
+
+        The handle_duplicates parameter only affects behavior when duplicates exist.
+        When there are no duplicates, units are always stripped regardless of mode.
+        """
+        df_base = pd.DataFrame({
+            'Field [T]': [0, 1, 2],
+            'Voltage [V]': [1.0, 2.0, 3.0],
+        })
+
+        # ALL modes should strip units when there are no duplicates
+        for mode in ['suffix', 'preserve', 'mangle', 'error']:
+            df = df_base.copy()
+            df.ms.init_msheet(units=False)
+            df.ms.infer_ms_units(handle_duplicates=mode)
+
+            # When there are no duplicates, ALL modes strip units
+            assert 'Field' in df.columns, f"Failed for mode '{mode}'"
+            assert 'Voltage' in df.columns, f"Failed for mode '{mode}'"
+            assert df.ms.get_unit('Field') == 'T', f"Failed for mode '{mode}'"
+            assert df.ms.get_unit('Voltage') == 'V', f"Failed for mode '{mode}'"
+
+    def test_dimensionless_and_unit_duplicate(self):
+        """Test when one duplicate is dimensionless and one has a unit."""
+        df = pd.DataFrame({
+            'Signal []': [1.0, 2.0, 3.0],
+            'Signal [V]': [5.0, 10.0, 15.0],
+        })
+        df.ms.init_msheet()
+
+        # Both should be present with suffixes
+        columns = df.columns.tolist()
+        assert len(columns) == 2
+        assert all('Signal' in col for col in columns)
+
+        # Check units - one should be dimensionless, one should be V
+        units = [df.ms.get_unit(col) for col in columns]
+        assert '1' in units  # dimensionless
+        assert 'V' in units
+
+    def test_three_way_duplicate(self):
+        """Test three columns with same base name."""
+        df = pd.DataFrame({
+            'Current [mA]': [1, 2, 3],
+            'Current [A]': [0.001, 0.002, 0.003],
+            'Current [uA]': [1000, 2000, 3000],
+        })
+        df.ms.init_msheet()
+
+        # All should get suffixes since there are duplicates
+        columns = df.columns.tolist()
+        assert len(columns) == 3
+        assert all('Current' in col for col in columns)
+
+        # Verify units are correct for each
+        units_dict = {col: df.ms.get_unit(col) for col in columns}
+        units = list(units_dict.values())
+
+        # Check that we have 3 different units
+        assert len(set(units)) == 3
+        assert 'mA' in units
+        assert 'A' in units
+        assert 'uA' in units or 'µA' in units  # pint might format as µA
+
+
+class TestUnitTranslationAndValidation:
+    """Test unit translation and validation in duplicate handling."""
+
+    def test_translation_in_suffix_generation(self):
+        """Test that translations are applied when generating suffixes."""
+        df = pd.DataFrame({
+            'R [Ohm]': [100, 110, 120],
+            'R [mOhm]': [50, 55, 60],
+        })
+        df.ms.init_msheet(units=False)
+        df.ms.infer_ms_units(
+            handle_duplicates='suffix',
+            translations={'Ohm': 'ohm'}
+        )
+
+        # Should work with translation - column names depend on formatter
+        columns = df.columns.tolist()
+        assert len(columns) == 2
+        assert all('R' in col for col in columns)
+
+        # Verify units are correct (pint may store as 'Ω' or 'ohm')
+        units = [df.ms.get_unit(col) for col in columns]
+        assert len(set(units)) == 2  # Two different units
+
+    def test_invalid_unit_raises_error(self):
+        """Test that invalid units (after translation) raise error."""
+        df = pd.DataFrame({
+            'Field [InvalidUnit]': [0, 1, 2],
+        })
+        df.ms.init_msheet(units=False)
+
+        # Should raise either ValueError or UndefinedUnitError
+        from pint.errors import UndefinedUnitError
+        with pytest.raises((ValueError, UndefinedUnitError)):
+            df.ms.infer_ms_units()
+
+    def test_make_unit_suffix_validates_units(self):
+        """Test that _make_unit_suffix validates units."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        df.ms.init_msheet()
+
+        # Valid unit should work
+        suffix = df.ms._make_unit_suffix('meter')
+        assert suffix == 'm'
+
+        # Invalid unit should raise
+        with pytest.raises(ValueError):
+            df.ms._make_unit_suffix('NotAUnit')
+
+    def test_make_unit_suffix_applies_translations(self):
+        """Test that _make_unit_suffix applies translations."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        df.ms.init_msheet()
+
+        # Should translate Ohm to ohm before validation
+        suffix = df.ms._make_unit_suffix('Ohm', translations={'Ohm': 'ohm'})
+        # Pint might format as 'Ω' or 'ohm'
+        assert suffix in ['Ω', 'ohm']
+
+    def test_dimensionless_suffix(self):
+        """Test that dimensionless units return '1' as suffix."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        df.ms.init_msheet()
+
+        assert df.ms._make_unit_suffix('') == '1'
+        assert df.ms._make_unit_suffix('1') == '1'

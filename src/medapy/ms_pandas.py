@@ -567,7 +567,8 @@ class MeasurementSheetAccessor:
     def infer_ms_units(self,
                        pattern: str | Pattern | None = None,
                        priority: str | None = None,
-                       translations: dict[str, str] | None = None
+                       translations: dict[str, str] | None = None,
+                       handle_duplicates: str = 'suffix'
                        ) -> None:
         """
         Infer units from column names and convert to pint dtype.
@@ -584,9 +585,105 @@ class MeasurementSheetAccessor:
         translations : dict[str, str], optional
             Dictionary mapping custom unit names to pint-compatible names.
             These translations take precedence over global translations.
+        handle_duplicates : str, default 'suffix'
+            How to handle duplicate base names after stripping units.
+            This parameter ONLY affects behavior when duplicates are detected.
+            When no duplicates exist, units are always stripped from column names.
+
+            - 'suffix': append unit-based suffix (e.g., 'I_mA', 'I_A')
+            - 'preserve': preserve original column names with brackets to avoid duplicates
+            - 'mangle': allow pandas-style numeric suffixes (e.g., 'I', 'I.1')
+            - 'error': raise error if duplicates would be created
+
+        Examples
+        --------
+        >>> # Input: columns ['I [mA]', 'I [A]']
+        >>> df.ms.infer_ms_units(handle_duplicates='suffix')
+        >>> # Result: columns ['I_mA', 'I_A'] with correct units
+
+        >>> df.ms.infer_ms_units(handle_duplicates='preserve')
+        >>> # Result: columns ['I [mA]', 'I [A]'] with units stored (brackets preserved)
+
+        >>> # Input: columns ['Field [T]', 'Voltage [V]'] (no duplicates)
+        >>> df.ms.infer_ms_units(handle_duplicates='preserve')
+        >>> # Result: columns ['Field', 'Voltage'] (brackets stripped - no duplicates!)
         """
+        if handle_duplicates not in ['suffix', 'preserve', 'mangle', 'error']:
+            raise ValueError(
+                f"handle_duplicates must be one of 'suffix', 'preserve', 'mangle', 'error', "
+                f"got '{handle_duplicates}'"
+            )
+
+        # First pass: parse column names to detect duplicates (minimal parsing, no translation/validation)
+        parsed_info = []
         for col in self._obj.columns:
-            self.infer_unit(col, pattern=pattern, priority=priority, translations=translations)
+            parsed_unit = self.parse_unit(col, pattern)
+            base_name = self.strip_unit(col, pattern) if parsed_unit is not None else col
+
+            parsed_info.append({
+                'original': col,
+                'base_name': base_name,
+                'parsed_unit': parsed_unit  # Keep raw unit string, will be translated later
+            })
+
+        # Detect which base names would be duplicated
+        base_names = [info['base_name'] for info in parsed_info]
+        base_name_counts = Counter(base_names)
+        duplicate_bases = {name for name, count in base_name_counts.items() if count > 1}
+
+        # Handle error case first
+        if duplicate_bases and handle_duplicates == 'error':
+            dup_list = ', '.join(f"'{name}'" for name in sorted(duplicate_bases))
+            raise ValueError(
+                f"Stripping units would create duplicate column names: {dup_list}. "
+                f"Use handle_duplicates='suffix' or 'preserve' to resolve."
+            )
+
+        # No duplicates: normal processing (always strip units regardless of handle_duplicates)
+        if not duplicate_bases:
+            for col in self._obj.columns:
+                self.infer_unit(col, pattern=pattern, priority=priority,
+                              translations=translations, strip_unit=True, suffix='')
+            return
+
+        # Has duplicates: calculate strip_unit and suffix for each column
+        if handle_duplicates == 'preserve':
+            # Preserve original names with brackets - don't strip units
+            for col in self._obj.columns:
+                self.infer_unit(col, pattern=pattern, priority=priority,
+                              translations=translations, strip_unit=False, suffix='')
+
+        elif handle_duplicates == 'suffix':
+            # Add unit-based suffixes for duplicates
+            for info in parsed_info:
+                col = info['original']
+                if info['base_name'] in duplicate_bases and info['parsed_unit']:
+                    # Use _make_unit_suffix which handles translation and validation
+                    unit_suffix = self._make_unit_suffix(info['parsed_unit'], translations)
+                    suffix = f'_{unit_suffix}'
+                else:
+                    suffix = ''
+
+                self.infer_unit(col, pattern=pattern, priority=priority,
+                              translations=translations, strip_unit=True, suffix=suffix)
+
+        elif handle_duplicates == 'mangle':
+            # Add pandas-style numeric suffixes
+            seen_names = {}
+            for info in parsed_info:
+                col = info['original']
+                base_name = info['base_name']
+
+                if base_name in seen_names:
+                    count = seen_names[base_name]
+                    suffix = f'.{count}'
+                    seen_names[base_name] += 1
+                else:
+                    suffix = ''
+                    seen_names[base_name] = 1
+
+                self.infer_unit(col, pattern=pattern, priority=priority,
+                              translations=translations, strip_unit=True, suffix=suffix)
 
     def convert_ms_units(self, to_units: list[str | pint.Unit]) -> None:
         """Convert msheet data to different units at once."""
@@ -610,7 +707,9 @@ class MeasurementSheetAccessor:
     def infer_unit(self, column: str,
                    pattern: str | Pattern = None,
                    priority: str | None = None,
-                   translations: dict[str, str] | None = None
+                   translations: dict[str, str] | None = None,
+                   strip_unit: bool = True,
+                   suffix: str = ''
                    ) -> None:
         """
         Infer and set unit for a column while preserving column order.
@@ -629,6 +728,11 @@ class MeasurementSheetAccessor:
         translations : dict[str, str], optional
             Dictionary mapping custom unit names to pint-compatible names.
             These translations take precedence over global translations.
+        strip_unit : bool, default True
+            Whether to strip units from column name
+        suffix : str, default ''
+            Suffix to append to column name (should include separator if needed,
+            e.g., '_Am2', '.1')
         """
         if priority not in ['name', 'unit', None]:
             raise ValueError("priority must be 'name', 'unit' or None")
@@ -636,7 +740,13 @@ class MeasurementSheetAccessor:
         column = self.get_column(column)
         existing_unit = self.get_unit(column)
         parsed_unit = self.parse_unit(column, pattern)
-        new_col = self.strip_unit(column, pattern) if parsed_unit is not None else column
+
+        # Determine target column name
+        if strip_unit:
+            base_name = self.strip_unit(column, pattern) if parsed_unit is not None else column
+            new_col = base_name + suffix
+        else:
+            new_col = column
 
         # Translate custom unit name to pint-compatible. If None, returns None
         parsed_unit = self._translate_unit(parsed_unit, translations)
@@ -1737,3 +1847,49 @@ class MeasurementSheetAccessor:
         except UndefinedUnitError:
             raise ValueError(f"'{unit}' is not defined in pint unit registry")
         return pint_unit
+
+    def _make_unit_suffix(self, unit_str: str, translations: dict[str, str] | None = None) -> str:
+        """
+        Create a clean ASCII suffix from a unit string for use in column names.
+
+        Uses the custom 'colname' pint formatter for consistent, ASCII-friendly output.
+        Applies translations and validates units before formatting.
+
+        Parameters
+        ----------
+        unit_str : str
+            Unit string (e.g., 'emu', 'mu_B/f.u.', 'millivolt', 'A*m^2')
+        translations : dict[str, str], optional
+            Dictionary mapping custom unit names to pint-compatible names.
+            These translations take precedence over global translations.
+
+        Returns
+        -------
+        str
+            Clean ASCII suffix suitable for column name (e.g., 'mV', 'Am2')
+
+        Raises
+        ------
+        ValueError
+            If the unit string (after translation) is not valid in pint registry
+
+        Examples
+        --------
+        >>> self._make_unit_suffix('millivolt')
+        'mV'
+        >>> self._make_unit_suffix('A*m^2')
+        'Am2'
+        """
+        if not unit_str or unit_str == self.DIMENSIONLESS_UNIT:
+            return self.DIMENSIONLESS_UNIT
+
+        # Translate unit
+        translated_unit = self._translate_unit(unit_str, translations)
+        if not translated_unit:
+            return self.DIMENSIONLESS_UNIT
+
+        # Validate unit using (will raise ValueError if invalid)
+        unit_obj = self._validate_unit(translated_unit)
+
+        # Format using pint's custom 'colname' formatter for ASCII-friendly column names
+        return format(unit_obj, '~colname')
