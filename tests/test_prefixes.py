@@ -232,6 +232,85 @@ class TestValueToPrefix:
         assert scaled == 0.001
         assert prefix == 'y'
 
+    def test_auto_precision_different_scales(self):
+        """Test auto precision behavior across different value scales."""
+        # No prefix range [1, 1000)
+        scaled, prefix = value_to_prefix(100.0, precision='auto')
+        assert scaled == 100
+        assert prefix == ''
+
+        scaled, prefix = value_to_prefix(100.5, precision='auto')
+        assert scaled == 100.5
+        assert prefix == ''
+
+        scaled, prefix = value_to_prefix(100.125, precision='auto')
+        assert scaled == 100.125
+        assert prefix == ''
+
+        # Kilo range
+        scaled, prefix = value_to_prefix(1000.0, precision='auto')
+        assert scaled == 1
+        assert prefix == 'k'
+
+        scaled, prefix = value_to_prefix(1500.0, precision='auto')
+        assert scaled == 1.5
+        assert prefix == 'k'
+
+        scaled, prefix = value_to_prefix(1250.0, precision='auto')
+        assert scaled == 1.25
+        assert prefix == 'k'
+
+        # Milli range
+        scaled, prefix = value_to_prefix(0.001, precision='auto')
+        assert scaled == 1
+        assert prefix == 'm'
+
+        scaled, prefix = value_to_prefix(0.0015, precision='auto')
+        assert scaled == 1.5
+        assert prefix == 'm'
+
+        scaled, prefix = value_to_prefix(0.001125, precision='auto')
+        assert scaled == 1.125
+        assert prefix == 'm'
+
+    def test_auto_precision_removes_trailing_zeros(self):
+        """Test that auto precision removes unnecessary trailing zeros."""
+        # Integer-like values should have no decimals
+        scaled, prefix = value_to_prefix(1000.0, precision='auto')
+        assert scaled == 1  # Not 1.0 or 1.00
+        assert prefix == 'k'
+
+        scaled, prefix = value_to_prefix(100.0, precision='auto')
+        assert scaled == 100
+        assert prefix == ''
+
+        # Values with significant decimals keep them
+        scaled, prefix = value_to_prefix(1500.0, precision='auto')
+        assert scaled == 1.5
+        assert prefix == 'k'
+
+    def test_auto_precision_boundary_conditions(self):
+        """Test auto precision at critical boundary values."""
+        # At 999.9 (stays in no-prefix range)
+        scaled, prefix = value_to_prefix(999.9, precision='auto')
+        assert scaled == 999.9
+        assert prefix == ''
+
+        # At 1000.0 (switches to kilo)
+        scaled, prefix = value_to_prefix(1000.0, precision='auto')
+        assert scaled == 1
+        assert prefix == 'k'
+
+        # At 0.999 (switches to milli)
+        scaled, prefix = value_to_prefix(0.999, precision='auto')
+        assert scaled == 999
+        assert prefix == 'm'
+
+        # At 1.0 (stays in no-prefix range)
+        scaled, prefix = value_to_prefix(1.0, precision='auto')
+        assert scaled == 1
+        assert prefix == ''
+
 
 class TestFormatWithPrefix:
     """Tests for format_with_prefix function."""
@@ -282,6 +361,100 @@ class TestFormatWithPrefix:
 
         # Values with decimals
         assert format_with_prefix(1500.0, precision='auto') == '1.5 k'
+
+    def test_auto_precision_no_prefix_range(self):
+        """Test auto precision for values in [1, 1000) that need no prefix."""
+        # Integer-like values
+        assert format_with_prefix(100.0, precision='auto') == '100'
+        assert format_with_prefix(1.0, precision='auto') == '1'
+        assert format_with_prefix(999.0, precision='auto') == '999'
+
+        # Values with one decimal
+        assert format_with_prefix(100.5, precision='auto') == '100.5'
+        assert format_with_prefix(1.5, precision='auto') == '1.5'
+        assert format_with_prefix(999.9, precision='auto') == '999.9'
+
+        # Values with two decimals
+        assert format_with_prefix(100.25, precision='auto') == '100.25'
+        assert format_with_prefix(1.25, precision='auto') == '1.25'
+
+        # Values with three decimals
+        assert format_with_prefix(100.125, precision='auto') == '100.125'
+        assert format_with_prefix(1.125, precision='auto') == '1.125'
+
+    def test_auto_precision_small_prefixes(self):
+        """Test auto precision with milli, micro, nano prefixes."""
+        # Milli (1e-3)
+        assert format_with_prefix(0.001, precision='auto') == '1 m'
+        assert format_with_prefix(0.0015, precision='auto') == '1.5 m'
+        assert format_with_prefix(0.001125, precision='auto') == '1.125 m'
+
+        # Micro (1e-6)
+        assert format_with_prefix(1e-6, precision='auto') == '1 u'
+        assert format_with_prefix(1.5e-6, precision='auto') == '1.5 u'
+        assert format_with_prefix(100e-6, precision='auto') == '100 u'
+
+        # Nano (1e-9)
+        assert format_with_prefix(1e-9, precision='auto') == '1 n'
+        assert format_with_prefix(2.5e-9, precision='auto') == '2.5 n'
+
+    def test_auto_precision_large_prefixes(self):
+        """Test auto precision with kilo, mega, giga prefixes."""
+        # Kilo (1e3)
+        assert format_with_prefix(1000.0, precision='auto') == '1 k'
+        assert format_with_prefix(1500.0, precision='auto') == '1.5 k'
+        assert format_with_prefix(1250.0, precision='auto') == '1.25 k'
+
+        # Mega (1e6)
+        assert format_with_prefix(1e6, precision='auto') == '1 M'
+        assert format_with_prefix(1.5e6, precision='auto') == '1.5 M'
+        assert format_with_prefix(1.125e6, precision='auto') == '1.125 M'
+
+        # Giga (1e9)
+        assert format_with_prefix(1e9, precision='auto') == '1 G'
+        assert format_with_prefix(2.5e9, precision='auto') == '2.5 G'
+        assert format_with_prefix(100e9, precision='auto') == '100 G'
+
+    def test_auto_precision_boundary_values(self):
+        """Test auto precision at boundaries between prefix ranges."""
+        # At 1000 boundary (no prefix -> kilo)
+        assert format_with_prefix(999.0, precision='auto') == '999'
+        assert format_with_prefix(999.9, precision='auto') == '999.9'
+        assert format_with_prefix(1000.0, precision='auto') == '1 k'
+
+        # At 1 boundary (milli -> no prefix)
+        assert format_with_prefix(0.999, precision='auto') == '999 m'
+        assert format_with_prefix(1.0, precision='auto') == '1'
+        assert format_with_prefix(1.001, precision='auto') == '1.001'
+
+    def test_auto_precision_vs_fixed_precision(self):
+        """Test that auto precision differs from fixed precision."""
+        # Auto should minimize decimals
+        auto_result = format_with_prefix(100.0, precision='auto')
+        assert auto_result == '100'
+
+        # Fixed should always show requested decimals
+        fixed_result = format_with_prefix(100.0, precision=2)
+        assert fixed_result == '100.00'
+
+        # Auto adapts to actual precision needed
+        auto_result = format_with_prefix(1.5e6, precision='auto')
+        assert auto_result == '1.5 M'
+
+        # Fixed forces precision
+        fixed_result = format_with_prefix(1.5e6, precision=3)
+        assert fixed_result == '1.500 M'
+
+    def test_auto_precision_negative_values(self):
+        """Test auto precision with negative values."""
+        assert format_with_prefix(-100.0, precision='auto') == '-100'
+        assert format_with_prefix(-100.5, precision='auto') == '-100.5'
+        assert format_with_prefix(-1500.0, precision='auto') == '-1.5 k'
+        assert format_with_prefix(-0.001, precision='auto') == '-1 m'
+
+    def test_auto_precision_zero(self):
+        """Test auto precision with zero."""
+        assert format_with_prefix(0.0, precision='auto') == '0'
 
     def test_full_precision(self):
         """Test full precision (no rounding) with precision=None."""
@@ -379,6 +552,97 @@ class TestDetectMinPrecision:
         # Value needs 2 decimals and max is 3
         result = detect_min_precision(100.12, max_decimals=3)
         assert result == 2
+
+    def test_small_value_scales(self):
+        """Test precision detection for small values."""
+        assert detect_min_precision(0.1) == 1
+        assert detect_min_precision(0.5) == 1
+        assert detect_min_precision(0.01) == 2
+        assert detect_min_precision(0.001) == 3
+        assert detect_min_precision(0.123) == 3
+        assert detect_min_precision(0.12) == 2
+
+    def test_large_value_scales(self):
+        """Test precision detection for large values."""
+        assert detect_min_precision(1000.0) == 0
+        assert detect_min_precision(10000.0) == 0
+        assert detect_min_precision(1000.5) == 1
+        assert detect_min_precision(10000.5) == 1
+        assert detect_min_precision(99999.99) == 2
+
+    def test_medium_value_scales(self):
+        """Test precision detection for values in [1, 100) range."""
+        assert detect_min_precision(1.0) == 0
+        assert detect_min_precision(1.5) == 1
+        assert detect_min_precision(10.0) == 0
+        assert detect_min_precision(10.5) == 1
+        assert detect_min_precision(10.25) == 2
+        assert detect_min_precision(99.999) == 3
+
+    def test_zero_value(self):
+        """Test precision detection for zero."""
+        assert detect_min_precision(0.0) == 0
+
+    def test_negative_values(self):
+        """Test precision detection for negative values."""
+        assert detect_min_precision(-100.0) == 0
+        assert detect_min_precision(-100.5) == 1
+        assert detect_min_precision(-0.123) == 3
+        assert detect_min_precision(-1.5) == 1
+
+    def test_values_needing_exactly_max_decimals(self):
+        """Test values that need exactly max_decimals places."""
+        assert detect_min_precision(1.123, max_decimals=3) == 3
+        assert detect_min_precision(1.12, max_decimals=2) == 2
+        assert detect_min_precision(99.999, max_decimals=3) == 3
+        assert detect_min_precision(0.001, max_decimals=3) == 3
+
+    def test_trailing_zeros(self):
+        """Test that trailing zeros are correctly identified."""
+        # 1.100 should need only 1 decimal, not 2
+        assert detect_min_precision(1.1) == 1
+        assert detect_min_precision(1.10) == 1
+
+        # 100.00 should need 0 decimals
+        assert detect_min_precision(100.00) == 0
+
+    def test_floating_point_representation_edge_cases(self):
+        """Test values with binary floating-point representation issues."""
+        # 0.1 cannot be exactly represented in binary
+        # The function should handle this gracefully within max_decimals
+        result = detect_min_precision(0.1, max_decimals=3)
+        assert result <= 3
+
+        # 0.3 also has representation issues
+        result = detect_min_precision(0.3, max_decimals=3)
+        assert result <= 3
+
+        # 1.1 has representation issues
+        result = detect_min_precision(1.1, max_decimals=3)
+        assert result <= 3
+
+    def test_boundary_values(self):
+        """Test values near decimal boundaries.
+
+        The function scales values by 10^max_decimals then rounds,
+        so some boundary values will round to integers.
+        """
+        # 0.9999 * 1000 = 999.9 → rounds to 1000 → scales back to 1.0
+        assert detect_min_precision(0.9999, max_decimals=3) == 0
+
+        # 1.0001 * 1000 = 1000.1 → rounds to 1000 → scales back to 1.0
+        assert detect_min_precision(1.0001, max_decimals=3) == 0
+
+        # 999.999 * 1000 = 999999 → stays 999999 → scales back to 999.999
+        assert detect_min_precision(999.999, max_decimals=3) == 3
+
+        # 1000.001 * 1000 = 1000001 → stays 1000001 → scales back to 1000.001
+        assert detect_min_precision(1000.001, max_decimals=3) == 3
+
+        # Values that clearly need the precision
+        assert detect_min_precision(0.9991, max_decimals=3) == 3
+        assert detect_min_precision(1.0011, max_decimals=3) == 3
+        assert detect_min_precision(999.991, max_decimals=3) == 3
 
 
 class TestRoundToMeasurementPrecision:
