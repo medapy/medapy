@@ -1,4 +1,5 @@
-from .mfile import MeasurementFile, PolarizationType, ContactPair
+from .contact import ContactPair, PolarizationType
+from .mfile import MeasurementFile
 from .parameter import ParameterDefinition, Parameter, DefinitionsLoader, SweepDirection
 from .mcollection import MeasurementCollection
 

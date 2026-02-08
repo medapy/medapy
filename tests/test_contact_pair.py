@@ -2,7 +2,7 @@
 
 import pytest
 from decimal import Decimal
-from medapy.collection.mfile import ContactPair, PolarizationType
+from medapy.collection.contact import ContactPair, PolarizationType
 
 
 class TestContactPairCreation:

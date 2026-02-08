@@ -3,8 +3,7 @@
 import pytest
 from pathlib import Path
 from decimal import Decimal
-from medapy.collection.mfile import MeasurementFile, ContactPair
-from medapy.collection.parameter import ParameterDefinition, DefinitionsLoader
+from medapy.collection import MeasurementFile, ContactPair, ParameterDefinition, DefinitionsLoader
 
 
 class TestMeasurementFileCreation:
