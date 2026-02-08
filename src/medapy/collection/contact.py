@@ -3,8 +3,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 import re
+import warnings
 
 from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER, format_with_prefix
+from medapy.utils.warnings import MagnitudeFormatWarning
 
 class PolarizationType(Enum):
     CURRENT = 'I'
@@ -221,17 +223,36 @@ class ContactPair:
 
         Returns:
             ContactPair instance if parsing succeeds, None otherwise
+
+        Warnings:
+            MagnitudeFormatWarning: If text contains parentheses but magnitude
+                fails to parse (e.g., multiple prefixes, invalid prefix, missing unit)
         """
         m = contact_pattern.match(text)
         if not m:
             return None
         type_str, first, second, magnitude = m.groups()
-        return cls(
+
+        # Create the contact pair
+        contact_pair = cls(
             first_contact=int(first),
             second_contact=int(second) if second else None,
             polarization=PolarizationType(type_str),
             magnitude=cls._convert_magntude(magnitude) if magnitude else None,
         )
+
+        # Check if magnitude was attempted but failed to parse
+        has_parens = '(' in text and ')' in text
+        if has_parens and contact_pair.magnitude is None:
+            warnings.warn(
+                f"Invalid magnitude format in '{text}': contact pair parsed as {contact_pair} "
+                f"but magnitude could not be parsed. Common issues: invalid prefix "
+                f"or missing unit (A/V).",
+                MagnitudeFormatWarning,
+                stacklevel=2
+            )
+
+        return contact_pair
 
     def pair_matches(self, pair: int | tuple | str | ContactPair) -> bool:
         """
