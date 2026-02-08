@@ -15,7 +15,6 @@ from medapy.utils.prefixes import (
     format_with_prefix,
     parse_prefixed_value,
     _detect_min_precision,
-    _parse_measurement_precision,
     _round_to_measurement_precision,
     SYMBOL_TO_MULTIPLIER,
     MULTIPLIER_TO_SYMBOL,
@@ -349,33 +348,6 @@ class TestDetectMinPrecision:
         # Value needs 2 decimals and max is 3
         result = _detect_min_precision(100.12, max_decimals=3)
         assert result == 2
-
-
-class TestParseMeasurementPrecision:
-    """Tests for _parse_measurement_precision helper function."""
-
-    def test_standard_formats(self):
-        """Test parsing standard measurement precision formats."""
-        assert math.isclose(_parse_measurement_precision('1 m'), 0.001)
-        assert math.isclose(_parse_measurement_precision('10 u'), 1e-05)
-        assert math.isclose(_parse_measurement_precision('0.5 k'), 500.0)
-
-    def test_invalid_formats(self):
-        """Test that invalid formats raise ValueError."""
-        # Wrong number of parts
-        with pytest.raises(ValueError, match="format should be"):
-            _parse_measurement_precision('1')
-
-        with pytest.raises(ValueError, match="format should be"):
-            _parse_measurement_precision('1 m extra')
-
-        # Invalid number
-        with pytest.raises(ValueError, match="Invalid number"):
-            _parse_measurement_precision('abc m')
-
-        # Invalid prefix
-        with pytest.raises(ValueError, match="Unknown prefix"):
-            _parse_measurement_precision('1 X')
 
 
 class TestRoundToMeasurementPrecision:

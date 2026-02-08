@@ -455,55 +455,6 @@ def _detect_min_precision(value: float, max_decimals: int = 3) -> int:
     return max_decimals
 
 
-def _parse_measurement_precision(prec_str: str) -> float:
-    """
-    Parse measurement precision string to numeric value.
-
-    Parameters
-    ----------
-    prec_str : str
-        Measurement precision in format '<number> <prefix>'
-        Examples: '1 m', '10 u', '0.5 k'
-
-    Returns
-    -------
-    float
-        The numeric value of the measurement precision
-
-    Raises
-    ------
-    ValueError
-        If the format is invalid or prefix is not recognized
-
-    Examples
-    --------
-    >>> _parse_measurement_precision('1 m')
-    0.001
-    >>> _parse_measurement_precision('10 u')
-    1e-05
-    >>> _parse_measurement_precision('0.5 k')
-    500.0
-    """
-    parts = prec_str.strip().split()
-    if len(parts) != 2:
-        raise ValueError(
-            f"Measurement precision format should be '<number> <prefix>', "
-            f"got '{prec_str}'"
-        )
-
-    try:
-        magnitude = float(parts[0])
-    except ValueError:
-        raise ValueError(
-            f"Invalid number in measurement precision: '{parts[0]}'"
-        )
-
-    prefix = parts[1]
-    multiplier = prefix_to_multiplier(prefix)  # Will raise if prefix is invalid
-
-    return magnitude * multiplier
-
-
 def _round_to_measurement_precision(
     value: float,
     meas_prec: str | float
@@ -517,7 +468,7 @@ def _round_to_measurement_precision(
         The value to round
     meas_prec : str or float
         Measurement precision:
-        - str: '<number> <prefix>' format (e.g., '1 m')
+        - str: '<number> <prefix>' format (e.g., '1 m') or '<number>' (e.g., '10')
         - float: direct precision value (e.g., 0.001)
 
     Returns
@@ -540,7 +491,7 @@ def _round_to_measurement_precision(
     1420.0
     """
     if isinstance(meas_prec, str):
-        meas_prec = _parse_measurement_precision(meas_prec)
+        meas_prec = parse_prefixed_value(meas_prec)
 
     if meas_prec <= 0:
         raise ValueError(
