@@ -18,6 +18,10 @@ API documentation generated from docstrings.
 
 ::: medapy.collection.mfile
 
+### Contact Pair
+
+::: medapy.collection.contact
+
 ### Measurement Collection
 
 ::: medapy.collection.mcollection
@@ -55,6 +59,10 @@ API documentation generated from docstrings.
 ### Warnings
 
 ::: medapy.utils.warnings
+
+### SI Prefixes
+
+::: medapy.utils.prefixes
 
 ## Plot Configuration
 
