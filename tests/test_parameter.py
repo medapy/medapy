@@ -451,3 +451,101 @@ class TestParameterIntegration:
         param = Parameter(pos_def)
         param.set_fixed("OOP")
         assert param.state.value == Decimal('0')
+
+
+class TestPrefixParsing:
+    """Test automatic SI prefix parsing functionality."""
+
+    def test_parse_millikelvin(self):
+        """Test parsing temperature with milli prefix."""
+        temp_def = ParameterDefinition(
+            name_id='temperature',
+            long_names=['temperature'],
+            short_names=['T'],
+            units=['K']  # Only base unit 'K', not 'mK'
+        )
+        param = Parameter(temp_def)
+        assert param.parse_fixed('T=100mK') is True
+        assert param.state.value == Decimal('0.1')
+        assert param.state.unit == 'K'
+
+    def test_parse_microkelvin(self):
+        """Test parsing temperature with micro prefix."""
+        temp_def = ParameterDefinition(
+            name_id='temperature',
+            long_names=['temperature'],
+            short_names=['T'],
+            units=['K']
+        )
+        param = Parameter(temp_def)
+        assert param.parse_fixed('T=500uK') is True
+        assert param.state.value == Decimal('0.0005')
+        assert param.state.unit == 'K'
+
+    def test_parse_millitesla_range(self):
+        """Test parsing field range with milli prefix - cleaner syntax."""
+        field_def = ParameterDefinition(
+            name_id='field',
+            long_names=['field'],
+            short_names=['B'],
+            units=['T']  # Only base unit 'T', not 'mT'
+        )
+        param = Parameter(field_def)
+        # Note: prefix specified once (5mT), not twice (5mto5mT)
+        assert param.parse_range('B-5to5mT') is True
+        assert param.state.min_val == Decimal('-0.005')
+        assert param.state.max_val == Decimal('0.005')
+        assert param.state.unit == 'T'
+
+    def test_parse_without_prefix_still_works(self):
+        """Test that unprefixed units still work correctly."""
+        field_def = ParameterDefinition(
+            name_id='field',
+            long_names=['field'],
+            short_names=['B'],
+            units=['T']
+        )
+        param = Parameter(field_def)
+        assert param.parse_range('B-14to14T') is True
+        assert param.state.min_val == Decimal('-14')
+        assert param.state.max_val == Decimal('14')
+        assert param.state.unit == 'T'
+
+    def test_various_si_prefixes(self):
+        """Test various SI prefixes are recognized."""
+        volt_def = ParameterDefinition(
+            name_id='voltage',
+            long_names=['voltage'],
+            short_names=['V'],
+            units=['V']
+        )
+
+        # kilo
+        param1 = Parameter(volt_def)
+        assert param1.parse_fixed('V=1kV') is True
+        assert param1.state.value == Decimal('1000')
+
+        # nano
+        param2 = Parameter(volt_def)
+        assert param2.parse_fixed('V=500nV') is True
+        assert param2.state.value == Decimal('5E-7')
+
+        # mega
+        param3 = Parameter(volt_def)
+        assert param3.parse_fixed('V=2MV') is True
+        assert param3.state.value == Decimal('2000000')
+
+    def test_prefix_not_in_base_units_ignored(self):
+        """Test that prefixes are only applied to defined base units."""
+        # If we define 'mT' as a base unit, 'mmT' should not be interpreted as milli-mT
+        field_def = ParameterDefinition(
+            name_id='field',
+            long_names=['field'],
+            short_names=['B'],
+            units=['T', 'mT']  # Both T and mT as base units
+        )
+        param = Parameter(field_def)
+        assert param.parse_fixed('B=5mT') is True
+        # Should recognize 'mT' as prefixed 'T'
+        assert param.state.value == Decimal('0.005')
+        assert param.state.unit == 'T'

@@ -7,6 +7,8 @@ from pathlib import Path
 from decimal import Decimal
 import json
 
+from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER
+
 
 class SweepDirection(Enum):
     INCREASING = 1
@@ -80,11 +82,17 @@ class ParameterDefinition:
         else:
             value_pattern = r'-?\d+\.?\d*(?:[eE][+-]?\d+)?'
 
+        # Generate prefixed units (e.g., 'K' -> 'K', 'mK', 'uK', 'nK', etc.)
+        prefixed_units = set(self.units)
+        for unit in self.units:
+            for prefix_symbol in SYMBOL_TO_MULTIPLIER:
+                prefixed_units.add(f'{prefix_symbol}{unit}')
+
         return {
             'LNAME': '|'.join(map(re.escape, self.long_names)),
             'SNAME': '|'.join(map(re.escape, self.short_names)),
             'NAME': '|'.join(map(re.escape, self.long_names | self.short_names)),
-            'UNIT': '|'.join(map(re.escape, self.units)),
+            'UNIT': '|'.join(map(re.escape, prefixed_units)),
             'VALUE': value_pattern,
         }
 
@@ -168,6 +176,44 @@ class Parameter:
         if self.state.min_val is not None and self.state.max_val is not None:
             self.set_swept(self.state.min_val, self.state.max_val)
 
+    def _decompose_prefixed_unit(self, unit_str: str | None) -> tuple[float, str | None]:
+        """
+        Decompose a potentially prefixed unit into multiplier and base unit.
+
+        Parameters
+        ----------
+        unit_str : str or None
+            Unit string that may include an SI prefix (e.g., 'mK', 'uT', 'K')
+
+        Returns
+        -------
+        tuple[float, str | None]
+            (multiplier, base_unit) where multiplier is 1.0 for unprefixed units
+
+        Examples
+        --------
+        >>> _decompose_prefixed_unit('mK')
+        (0.001, 'K')
+        >>> _decompose_prefixed_unit('K')
+        (1.0, 'K')
+        >>> _decompose_prefixed_unit(None)
+        (1.0, None)
+        """
+        if not unit_str:
+            return 1.0, unit_str
+
+        # Check if unit starts with a known SI prefix
+        if len(unit_str) > 1 and unit_str[0] in SYMBOL_TO_MULTIPLIER:
+            prefix = unit_str[0]
+            base_unit = unit_str[1:]
+            # Verify the base unit is in the defined units
+            if base_unit in self.definition.units:
+                multiplier = SYMBOL_TO_MULTIPLIER[prefix]
+                return multiplier, base_unit
+
+        # No prefix found or base unit not in definitions
+        return 1.0, unit_str
+
     def parse_fixed(self, text: str) -> bool:
         """Parse fixed parameter value from regex match"""
         m = self.definition.match('fixed', text)
@@ -175,8 +221,16 @@ class Parameter:
             return False
         value_str = m.group(1)
         unit_str = m.group(2)
-        self.set_fixed(value_str)
-        self.state.unit = unit_str
+
+        # Decompose unit into prefix multiplier and base unit
+        multiplier, base_unit = self._decompose_prefixed_unit(unit_str)
+
+        # Parse value and apply prefix multiplier
+        value = self.decimal_of(value_str)
+        scaled_value = value * Decimal(str(multiplier))
+
+        self.set_fixed(scaled_value)
+        self.state.unit = base_unit
         return True
 
     def parse_range(self, text: str) -> bool:
@@ -185,8 +239,16 @@ class Parameter:
             return False
         start_str, end_str = m.group(1), m.group(2)
         unit_str = m.group(3)
-        self.set_swept(start_str, end_str)
-        self.state.unit = unit_str
+
+        # Decompose unit into prefix multiplier and base unit
+        multiplier, base_unit = self._decompose_prefixed_unit(unit_str)
+
+        # Parse values and apply prefix multiplier
+        start_val = self.decimal_of(start_str) * Decimal(str(multiplier))
+        end_val = self.decimal_of(end_str) * Decimal(str(multiplier))
+
+        self.set_swept(start_val, end_val)
+        self.state.unit = base_unit
         return True
 
     def parse_sweep(self, text: str) -> bool:
