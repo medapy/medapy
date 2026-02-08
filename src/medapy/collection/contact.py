@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import Enum
 import re
 
+from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER, format_with_prefix
 
 class PolarizationType(Enum):
     CURRENT = 'I'
@@ -187,11 +188,13 @@ class ContactPair:
                     unit = 'A'
                 else:
                     unit = 'V'
-                result += "({magn:{fmt}}{unit})".format(
-                    magn=self.magnitude,
-                    fmt='.2g' if 0.01 <= self.magnitude <= 100 else '.1e',
-                    unit=unit,
+                # Format magnitude with SI prefix (no space for compact representation)
+                formatted_magnitude = format_with_prefix(
+                    float(self.magnitude),
+                    precision='auto',
+                    use_space=False
                 )
+                result += f"({formatted_magnitude}{unit})"
         return result
 
     def __post_init__(self):
@@ -352,18 +355,27 @@ class ContactPair:
 
     @staticmethod
     def _convert_magntude(magnitude):
-        return Decimal(
-            magnitude.replace('f', 'e-15')
-            .replace('p', 'e-12')
-            .replace('n', 'e-9')
-            .replace('u', 'e-6')
-            .replace('m', 'e-3')
-            .replace('k', 'e3')
-            .replace('M', 'e6')
-            .replace('G', 'e9')
-            .replace('T', 'e12')
-            .rstrip('AV')
-        )
+        # Strip unit suffix (A or V) before parsing
+        magnitude = magnitude.rstrip('AV')
+
+        # Check if there's a prefix (last character is a letter)
+        if magnitude and magnitude[-1].isalpha():
+            prefix = magnitude[-1]
+            numeric_part = magnitude[:-1]
+
+            if prefix in SYMBOL_TO_MULTIPLIER:
+                # Use Decimal throughout to avoid float precision issues
+                multiplier = SYMBOL_TO_MULTIPLIER[prefix]
+                value = Decimal(numeric_part) * Decimal(str(multiplier))
+                return value
+            else:
+                raise ValueError(
+                    f"Unknown prefix: '{prefix}'. "
+                    f"Valid prefixes: {list(SYMBOL_TO_MULTIPLIER.keys())}"
+                )
+        else:
+            # No prefix, parse directly as Decimal
+            return Decimal(magnitude)
 
     def __hash__(self):
         return hash(
