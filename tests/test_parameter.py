@@ -549,3 +549,114 @@ class TestPrefixParsing:
         # Should recognize 'mT' as prefixed 'T'
         assert param.state.value == Decimal('0.005')
         assert param.state.unit == 'T'
+
+
+class TestSIFormatting:
+    """Test SI prefix formatting in __str__ method."""
+
+    def test_si_formatting_enabled_fixed(self):
+        """Test that SI formatting converts values with prefixes when enabled."""
+        temp_def = ParameterDefinition(
+            name_id='temperature',
+            long_names=['temperature'],
+            short_names=['T'],
+            units=['K'],
+            si_formatting=True,  # Enable SI formatting
+            precision='auto'
+        )
+        param = Parameter(temp_def)
+        param.set_fixed(0.1)
+        param.state.unit = 'K'
+
+        # Should format as 100mK, not 0.1K
+        result = str(param)
+        assert 'mK' in result or '100m' in result
+        assert '100' in result
+
+    def test_si_formatting_disabled_fixed(self):
+        """Test that SI formatting is disabled when si_formatting=False."""
+        temp_def = ParameterDefinition(
+            name_id='temperature',
+            long_names=['temperature'],
+            short_names=['T'],
+            units=['C'],
+            si_formatting=False,  # Disable SI formatting
+            precision='auto'
+        )
+        param = Parameter(temp_def)
+        param.set_fixed(1400)
+        param.state.unit = 'C'
+
+        # Should format as 1400C, NOT 1.4kC
+        result = str(param)
+        assert '1400' in result or '1.4e+03' in result
+        assert 'kC' not in result
+
+    def test_si_formatting_enabled_range(self):
+        """Test SI formatting for range parameters."""
+        field_def = ParameterDefinition(
+            name_id='field',
+            long_names=['field'],
+            short_names=['B'],
+            units=['T'],
+            si_formatting=True,
+            precision='auto'
+        )
+        param = Parameter(field_def)
+        param.set_swept(-0.005, 0.005)
+        param.state.unit = 'T'
+
+        # Should format with mT prefix
+        result = str(param)
+        assert 'mT' in result or 'm' in result
+        assert '5' in result
+
+    def test_precision_control_fixed(self):
+        """Test precision parameter controls decimal places."""
+        voltage_def = ParameterDefinition(
+            name_id='voltage',
+            long_names=['voltage'],
+            short_names=['V'],
+            units=['V'],
+            si_formatting=True,
+            precision=3  # Fixed precision
+        )
+        param = Parameter(voltage_def)
+        param.set_fixed(0.001234)
+        param.state.unit = 'V'
+
+        result = str(param)
+        # Should have 3 decimal places
+        assert '1.234' in result
+
+    def test_precision_auto(self):
+        """Test auto precision mode."""
+        voltage_def = ParameterDefinition(
+            name_id='voltage',
+            long_names=['voltage'],
+            short_names=['V'],
+            units=['V'],
+            si_formatting=False,
+            precision='auto'
+        )
+        param = Parameter(voltage_def)
+        param.set_fixed(100.0)
+        param.state.unit = 'V'
+
+        result = str(param)
+        # Auto precision should not add unnecessary decimals for 100.0
+        # Using .2g format, should be "1e+02" or "100"
+        assert '100' in result or '1e+02' in result
+
+    def test_loaded_definitions_use_formatting(self):
+        """Test that loaded definitions have formatting settings."""
+        loader = DefinitionsLoader()
+
+        # Temperature should use SI formatting
+        temp_def = loader.get_definition('temperature')
+        assert temp_def.si_formatting is True
+
+        # Position should not use SI formatting
+        pos_def = loader.get_definition('position')
+        assert pos_def.si_formatting is False
+        assert pos_def.precision == 1

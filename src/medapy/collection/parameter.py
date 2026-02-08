@@ -7,7 +7,7 @@ from pathlib import Path
 from decimal import Decimal
 import json
 
-from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER
+from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER, format_with_prefix, detect_min_precision
 
 
 class SweepDirection(Enum):
@@ -51,6 +51,8 @@ class ParameterDefinition:
     patterns: MappingProxyType[str, Pattern] = field(
         default_factory=lambda: MappingProxyType({}),
         repr=False)
+    si_formatting: bool = True  # Whether to format with SI prefixes
+    precision: int | str = 'auto'  # Precision for value formatting ('auto' or int)
 
     def __post_init__(self):
         self._to_immutables()
@@ -326,6 +328,8 @@ class Parameter:
         else:
             sname = None
 
+        unit = self.state.unit or ""
+
         if self.state.is_swept:
             name = lname or sname
             s = f'sweep{name}'
@@ -335,11 +339,54 @@ class Parameter:
                 mn, mx = self.state.min_val, self.state.max_val
                 if self.state.sweep_direction == SweepDirection.DECREASING:
                     mx, mn = mn, mx
-                s += f'{mn:.2g}to{mx:.2g}{self.state.unit or ""}'
+
+                # Format min and max values
+                if self.definition.si_formatting:
+                    mn_str = format_with_prefix(
+                        float(mn),
+                        precision=self.definition.precision,
+                        use_space=False
+                    )
+                    mx_str = format_with_prefix(
+                        float(mx),
+                        precision=self.definition.precision,
+                        use_space=False
+                    )
+                else:
+                    # No SI prefix formatting
+                    if self.definition.precision == 'auto':
+                        prec_mn = detect_min_precision(float(mn))
+                        prec_mx = detect_min_precision(float(mx))
+                        mn_str = f'{float(mn):.{prec_mn}f}'
+                        mx_str = f'{float(mx):.{prec_mx}f}'
+                    else:
+                        prec = self.definition.precision
+                        mn_str = f'{float(mn):.{prec}f}'
+                        mx_str = f'{float(mx):.{prec}f}'
+
+                s += f'{mn_str}to{mx_str}{unit}'
             return s
         else:
             name = sname or lname
-            return f'{name}={self.state.value:.2g}{self.state.unit or ""}'
+            value = float(self.state.value)
+
+            # Format value with or without SI prefixes
+            if self.definition.si_formatting:
+                value_str = format_with_prefix(
+                    value,
+                    precision=self.definition.precision,
+                    use_space=False
+                )
+            else:
+                # No SI prefix formatting
+                if self.definition.precision == 'auto':
+                    prec = detect_min_precision(value)
+                    value_str = f'{value:.{prec}f}'
+                else:
+                    prec = self.definition.precision
+                    value_str = f'{value:.{prec}f}'
+
+            return f'{name}={value_str}{unit}'
 
     def __repr__(self):
         return ('Parameter: '
@@ -361,7 +408,7 @@ class DefinitionsLoader:
         self.load_definitions(default_path)
 
     def load_definitions(self, path: Path | str):
-        """Load custom parameter definitions from YAML"""
+        """Load custom parameter definitions from JSON"""
         with open(path, 'r') as f:
             definitions = json.load(f)
 
@@ -373,6 +420,9 @@ class DefinitionsLoader:
             definition['units'] = frozenset(definition.get('units', []))
             definition['special_values'] = MappingProxyType(definition.get('special_values', {}))
             definition['patterns'] = MappingProxyType(definition.get('patterns', {}))
+            # New formatting options with defaults
+            definition['si_formatting'] = definition.get('si_formatting', True)
+            definition['precision'] = definition.get('precision', 'auto')
             self._definitions[name] = definition
 
     def get_definition_dict(self, name: str) -> dict[str, set]:

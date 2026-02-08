@@ -2,15 +2,19 @@
     "magnetic_field": {
         "long_names": ["field", "Field"],
         "short_names": ["B", "H"],
-        "units": ["T", "Oe", "G", "mT"]
+        "units": ["T", "Oe", "G"],
+        "si_formatting": true,
+        "precision": "auto"
     },
 
     "temperature": {
         "long_names": ["temperature", "Temperature", "temp", "Temp"],
         "short_names": ["T"],
-        "units": ["K", "mK", "C"]
+        "units": ["K", "C"],
+        "si_formatting": true,
+        "precision": "auto"
     },
-    
+
     "position": {
         "long_names": ["position", "Position", "theta", "Theta"],
         "short_names": ["pos", "Pos"],
@@ -18,6 +22,8 @@
         "special_values": {
             "OOP": 0,
             "IP": 90
-        }
+        },
+        "si_formatting": false,
+        "precision": 1
     }
 }
