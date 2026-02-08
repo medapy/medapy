@@ -14,7 +14,7 @@ from medapy.utils.prefixes import (
     value_to_prefix,
     format_with_prefix,
     parse_prefixed_value,
-    _detect_min_precision,
+    detect_min_precision,
     _round_to_measurement_precision,
     SYMBOL_TO_MULTIPLIER,
     MULTIPLIER_TO_SYMBOL,
@@ -186,6 +186,15 @@ class TestValueToPrefix:
         assert scaled == 1.23
         assert prefix == 'M'
 
+        # Full precision (no rounding)
+        scaled, prefix = value_to_prefix(123.456789, precision=None)
+        assert scaled == 123.456789  # Not rounded
+        assert prefix == ''
+
+        scaled, prefix = value_to_prefix(1234.56789, precision=None)
+        assert math.isclose(scaled, 1.23456789)  # Not rounded, just scaled
+        assert prefix == 'k'
+
     def test_measurement_precision_string(self):
         """Test measurement precision with string format."""
         # Round 0.1417 to nearest 1 milli
@@ -274,6 +283,28 @@ class TestFormatWithPrefix:
         # Values with decimals
         assert format_with_prefix(1500.0, precision='auto') == '1.5 k'
 
+    def test_full_precision(self):
+        """Test full precision (no rounding) with precision=None."""
+        # Value with many decimal places - shows full precision
+        result = format_with_prefix(123.456789, precision=None)
+        assert result == '123.456789'  # Full precision (up to 15 sig figs)
+
+        # With prefix - clean output without FP artifacts
+        result = format_with_prefix(1234.56789, precision=None)
+        assert result == '1.23456789 k'
+
+        # Compare with auto precision (capped at 3 decimals)
+        result_auto = format_with_prefix(123.456789, precision='auto')
+        assert result_auto == '123.457'  # Auto truncates
+
+        # Full precision shows more detail than auto
+        result_none = format_with_prefix(123.456789, precision=None)
+        assert len(result_none) > len(result_auto)
+
+        # Removes trailing zeros
+        result = format_with_prefix(100.0, precision=None)
+        assert result == '100'
+
 
 class TestParsePrefixedValue:
     """Tests for parse_prefixed_value function."""
@@ -326,27 +357,27 @@ class TestParsePrefixedValue:
 
 
 class TestDetectMinPrecision:
-    """Tests for _detect_min_precision helper function."""
+    """Tests for detect_min_precision helper function."""
 
     def test_integer_values(self):
         """Test precision detection for integer-like values."""
-        assert _detect_min_precision(100.0) == 0
-        assert _detect_min_precision(1.0) == 0
+        assert detect_min_precision(100.0) == 0
+        assert detect_min_precision(1.0) == 0
 
     def test_decimal_values(self):
         """Test precision detection for decimal values."""
-        assert _detect_min_precision(100.5) == 1
-        assert _detect_min_precision(100.12) == 2
-        assert _detect_min_precision(100.123) == 3
+        assert detect_min_precision(100.5) == 1
+        assert detect_min_precision(100.12) == 2
+        assert detect_min_precision(100.123) == 3
 
     def test_max_decimals_limit(self):
         """Test that max_decimals parameter limits precision."""
         # Value needs 4 decimals but max is 3
-        result = _detect_min_precision(100.1234, max_decimals=3)
+        result = detect_min_precision(100.1234, max_decimals=3)
         assert result == 3
 
         # Value needs 2 decimals and max is 3
-        result = _detect_min_precision(100.12, max_decimals=3)
+        result = detect_min_precision(100.12, max_decimals=3)
         assert result == 2
 
 

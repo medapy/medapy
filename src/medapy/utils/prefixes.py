@@ -179,7 +179,8 @@ def value_to_prefix(
     precision : int, 'auto', or None, optional
         Decimal places for output (default is 'auto'):
         - int: exact decimal places (e.g., 2 → "1.50")
-        - 'auto' or None: minimum needed decimals (e.g., 100.0 → "100", 100.5 → "100.5")
+        - 'auto': minimum needed decimals up to 3 (e.g., 100.0 → "100", 100.5 → "100.5")
+        - None: full precision, no rounding
     measurement_precision : str or float, optional
         Measurement resolution for rounding before scaling:
         - str: '<value> <prefix>' format (e.g., '1 m', '10 u')
@@ -221,8 +222,9 @@ def value_to_prefix(
 
     # No prefix needed for values in [1, 1000)
     if 1 <= abs_value < 1000:
-        if precision == 'auto' or precision is None:
-            precision = _detect_min_precision(value)
+        if precision == 'auto':
+            precision = detect_min_precision(value)
+        # Round only if precision is specified (not None)
         if precision is not None:
             value = round(value, precision)
         return (value, '')
@@ -250,10 +252,10 @@ def value_to_prefix(
     scaled_value = value / actual_multiplier
 
     # Determine precision
-    if precision == 'auto' or precision is None:
-        precision = _detect_min_precision(scaled_value)
+    if precision == 'auto':
+        precision = detect_min_precision(scaled_value)
 
-    # Round if precision is specified
+    # Round only if precision is specified (not None)
     if precision is not None:
         scaled_value = round(scaled_value, precision)
 
@@ -277,7 +279,8 @@ def format_with_prefix(
     precision : int, 'auto', or None, optional
         Decimal places for output (default is 'auto'):
         - int: exact decimal places
-        - 'auto' or None: minimum needed decimals
+        - 'auto': minimum needed decimals up to 3
+        - None: full precision, no rounding
     measurement_precision : str or float, optional
         Measurement resolution (see value_to_prefix for details)
     use_exp_fallback : bool, optional
@@ -329,22 +332,32 @@ def format_with_prefix(
 
     if needs_exp_notation:
         # Use exponential notation
-        if precision == 'auto' or precision is None:
+        if precision == 'auto':
             # Let Python decide precision with 'g' format
             return f"{scaled_value:g}"
+        elif precision is None:
+            # Full precision - use high precision 'g' format (15 sig figs)
+            return f"{scaled_value:.15g}"
         else:
             # Use explicit precision with 'e' format
             return f"{scaled_value:.{precision}e}"
 
     # Standard formatting with SI prefix
-    if precision == 'auto' or precision is None:
-        precision = _detect_min_precision(scaled_value)
+    if precision == 'auto':
+        precision = detect_min_precision(scaled_value)
+
+    # Format the value
+    if precision is not None:
+        formatted_value = f"{scaled_value:.{precision}f}"
+    else:
+        # Full precision - use high precision 'g' format (15 sig figs, removes trailing zeros)
+        formatted_value = f"{scaled_value:.15g}"
 
     if prefix:
         space = ' ' if use_space else ''
-        return f"{scaled_value:.{precision}f}{space}{prefix}"
+        return f"{formatted_value}{space}{prefix}"
     else:
-        return f"{scaled_value:.{precision}f}"
+        return formatted_value
 
 
 def parse_prefixed_value(value_str: str) -> float:
@@ -422,7 +435,7 @@ def parse_prefixed_value(value_str: str) -> float:
     return value
 # Helper functions for smart precision
 
-def _detect_min_precision(value: float, max_decimals: int = 3) -> int:
+def detect_min_precision(value: float, max_decimals: int = 3) -> int:
     """
     Detect the minimum number of decimal places needed to represent a value.
 
