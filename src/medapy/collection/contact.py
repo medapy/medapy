@@ -31,8 +31,11 @@ class PolarizationType(Enum):
         return super().__hash__()
 
 
+# Dynamically generate SI prefix character class from supported prefixes
+_SI_PREFIX_CHARS = ''.join(re.escape(p) for p in SYMBOL_TO_MULTIPLIER.keys())
+
 contact_pattern = re.compile(
-    r'([IV])(\d+)(?:-(\d+))?(?:\((-?\d+\.?\d*(?:[eE][+-]?\d+)?[fpnumkMGT]?[AV])\))?'
+    rf'([IV])(\d+)(?:-(\d+))?(?:\((-?\d+\.?\d*(?:[eE][+-]?\d+)?[{_SI_PREFIX_CHARS}]?[AV])\))?'
 )
 
 
