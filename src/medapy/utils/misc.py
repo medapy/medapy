@@ -5,7 +5,8 @@ from typing import Any, Callable, Iterable
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from scipy.signal import savgol_filter as scipy_savgol
+
+from .optional import require
 
 
 # Python functionality
@@ -657,6 +658,8 @@ def savgol_filter(
     # To implement padding and filtering on a lower level see links
     # https://github.com/scipy/scipy/blob/v1.15.2/scipy/signal/_savitzky_golay.py#L230
     # https://github.com/scipy/scipy/blob/v1.15.2/scipy/ndimage/_filters.py#L126
+
+    scipy_savgol = require('scipy.signal', extra='fit').savgol_filter
 
     valid_pad_modes = ['constant', 'edge', 'linear_ramp',
                       'maximum', 'mean', 'median', 'minimum',
