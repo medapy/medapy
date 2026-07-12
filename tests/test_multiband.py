@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from medapy.analysis.electron_transport import electron_transport as etr
+from medapy.analysis import etr
 
 
 class TestGenerateMultibandEq:

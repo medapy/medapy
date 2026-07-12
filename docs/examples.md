@@ -231,7 +231,7 @@ This example demonstrates electron transport analysis, including resistance-to-r
 **Basic Setup**
 ```python
 from medapy import ms_pandas, ureg # Global unit registry
-from medapy.analysis import electron_transport
+from medapy.analysis import etr
 import matplotlib.pyplot as plt
 ```
 

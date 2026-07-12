@@ -1,6 +1,6 @@
 import pandas as pd
 from medapy import ms_pandas
-from medapy.analysis import electron_transport
+from medapy.analysis import etr
 import matplotlib.pyplot as plt
 
 

@@ -1,5 +1,6 @@
-from . import electron_transport
+from . import transport
 from . import etr_pandas
 
-etr = electron_transport
-__all__ = ['etr', 'etr_pandas']
+etr = transport
+
+__all__ = ['etr', 'transport', 'etr_pandas']

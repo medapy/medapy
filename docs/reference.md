@@ -42,7 +42,7 @@ API documentation generated from docstrings.
 
 ::: medapy.analysis.electron_transport.etr_pandas
 
-::: medapy.analysis.electron_transport.electron_transport
+::: medapy.analysis.electron_transport.transport
 
 ## Utilities
 

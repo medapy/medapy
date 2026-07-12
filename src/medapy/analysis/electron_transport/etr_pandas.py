@@ -7,7 +7,7 @@ import pint
 
 from medapy.analysis import processing
 from medapy.analysis.proc_pandas import DataProcessingAccessor
-from . import electron_transport as etr
+from . import transport as etr
 
 
 ureg = pint.get_application_registry()
@@ -27,7 +27,7 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
     Examples
     --------
     >>> from medapy import ms_pandas, ureg
-    >>> from medapy.analysis.electron_transport import etr_pandas
+    >>> from medapy.analysis import etr
     >>> import pandas as pd
     >>> # Prepare measurement data
     >>> df = pd.DataFrame({
@@ -56,7 +56,7 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
     See Also
     --------
     DataProcessingAccessor : Base class with general processing methods
-    medapy.analysis.electron_transport.electron_transport : Underlying functions
+    medapy.analysis.electron_transport.transport : Underlying functions
     MeasurementSheetAccessor : Core measurement sheet functionality
 
     Notes

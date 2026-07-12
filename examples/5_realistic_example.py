@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from medapy import ms_pandas
-from medapy.analysis.electron_transport import etr, etr_pandas
+from medapy.analysis import etr
 from medapy.collection import MeasurementCollection, ContactPair, DefinitionsLoader
 
 ureg = ms_pandas.ureg # to ensure that pint UnitRegistry is the same

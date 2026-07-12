@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from medapy import ureg
 import medapy.ms_pandas  # Import to register the .ms accessor
-import medapy.analysis.electron_transport.etr_pandas  # Import to register the .etr accessor
+from medapy.analysis import etr  # Import to register the .etr accessor
 
 
 class TestElectricalTransportAccessorBasics:
