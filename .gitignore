@@ -32,3 +32,6 @@ pyrightconfig.json
 
 # Claude Code files
 CLAUDE.md
+
+# Example results
+examples/files/results/
