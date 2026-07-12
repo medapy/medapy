@@ -1,5 +1,6 @@
 from typing import Optional, Union, TextIO
 
+import textwrap
 from pathlib import Path
 import numpy as np
 import numpy.typing as npt
@@ -131,15 +132,18 @@ def fit_multiband(datasets: list[tuple],
         e.g., 'he' (2 bands), 'heh' (3 bands), 'ehee' (4 bands)
     bounds : dict or tuple, optional
         Parameter bounds as dict {'n1': (min, max), 'mu1': (min, max), ...}
-        or tuple of sequences ([n_mins, mu_mins, ...], [n_maxs, mu_maxs, ...])
+        or tuple of sequences ([n_mins, mu_mins, ...], [n_maxs, mu_maxs, ...]).
+        Bounds are given in linear units; parameters left unspecified (or set to
+        None) keep the defaults 1e20-1e28 m^-3 for densities and
+        0.001-1 m^2/Vs for mobilities
     fix_params : dict or array-like, optional
         Fix parameters: dict {'n1': True, 'mu2': True} or bool array
     expr : dict, optional
-        Mathematical constraints between parameters, e.g.:
+        Mathematical constraints between parameters. Parameters are fitted in
+        log10 space, so expressions are written in log10 space too:
         - {'n2': 'n1'} - same density for bands 1 and 2
-        - {'mu3': '0.301+mu1'} - mobility ratio constraint
-        Note: Expressions are evaluated after exponentiation
-        10**mu3 = 10**(0.301 + mu1) -> 10**mu3 = 2 * 10**mu1
+        - {'mu3': '0.301 + mu1'} - mu3 = 2 * mu1, since 10**(0.301 + mu1) = 2 * 10**mu1
+        - {'n2': 'log10(1e26 - 10**n1)'} - fixed total density n1 + n2 = 1e26
         Parameters with expr are not varied independently
     brute_step : dict or float, optional
         Step size for brute force method. Dict like {'n1': 0.1, 'mu1': 0.05}
@@ -152,6 +156,9 @@ def fit_multiband(datasets: list[tuple],
         If True, prints fit report to console.
         If string or Path, writes report to specified file in 'w' mode
         If file object, writes report to that file
+        The lmfit [[Variables]] block lists the log10-scaled parameters that are
+        actually fitted; the appended [[Rescaled values]] block lists the same
+        parameters in physical units, as returned
     handle_na : str, default 'raise'
         How to handle NaN/inf values: 'exclude' or 'raise'
 
@@ -159,6 +166,7 @@ def fit_multiband(datasets: list[tuple],
     -------
     tuple
         Fitted parameters (n1, mu1, n2, mu2, ...)
+        Densities in m^-3, mobilities in m^2/Vs
 
     Examples
     --------
@@ -170,15 +178,16 @@ def fit_multiband(datasets: list[tuple],
     # With electron-hole compensation constraint
     >>> result = fit_multiband(datasets, p0, bands='he', expr={'n2': 'n1'})
 
-    # With total carrier density constraint
+    # With total carrier density constraint (expressions are in log10 space)
     >>> p0 = [5e25, 0.015, 5e25, 0.02]
-    >>> result = fit_multiband(datasets, p0, bands='he', expr={'n2': '1e26 - n1'})
+    >>> result = fit_multiband(datasets, p0, bands='he',
+    ...                        expr={'n2': 'log10(1e26 - 10**n1)'})
 
     # Three-band system with mobility ratios
     >>> datasets = [(field, rho_xy, 'xy')]
     >>> p0 = [1e26, 0.01, 5e25, 0.02, 2e25, 0.015]
     >>> result = fit_multiband(datasets, p0, bands='hee',
-    ...                        expr={'mu2': 'mu1', 'mu3': '0.5*mu1'})
+    ...                        expr={'mu2': 'mu1', 'mu3': 'log10(0.5) + mu1'})
     """
     fit_kwargs = fit_kwargs or {}
 
@@ -208,8 +217,11 @@ def fit_multiband(datasets: list[tuple],
                          method=method,
                          **fit_kwargs)
 
+    # Parameters are stored interleaved (n1, mu1, n2, mu2, ...), as the equations expect them
+    p = tuple(_rescale_multiband_params(*(par.value for par in res.params.values())))
+
     if report:
-        report_text = lmfit.fit_report(res)
+        report_text = _multiband_fit_report(res, p, bands)
         if isinstance(report, bool):
             print(report_text)
         elif isinstance(report, (str, Path)):
@@ -218,44 +230,29 @@ def fit_multiband(datasets: list[tuple],
         else:  # TextIO
             print(report_text, file=report)
 
-    return tuple(_rescale_multiband_params(*res.params.values()))
-    # # Extract and rescale final parameters
-    # param_values = [res.params[f'n{i+1}'].value for i in range(n_bands)] + \
-    #                [res.params[f'mu{i+1}'].value for i in range(n_bands)]
-    # rescaled = _rescale_multiband_params(*param_values)
-
-    # # Interleave back to (n1, mu1, n2, mu2, ...) format
-    # result = []
-    # for i in range(n_bands):
-    #     result.append(rescaled[i])  # ni
-    #     result.append(rescaled[n_bands + i])  # mui
-
-    # return tuple(result)
+    return p
 
 ## multiband methods
+def _multiband_fit_report(res: lmfit.minimizer.MinimizerResult, p: tuple, bands: str) -> str:
+    """Build the fit report, appending the fitted parameters in physical units.
+
+    lmfit only sees the log10-scaled parameters, so its [[Variables]] block reports
+    exponents rather than densities and mobilities.
+    """
+    rescaled = textwrap.indent(multiband_fit_to_str(p, bands), '    ')
+    return f"{lmfit.fit_report(res)}\n[[Rescaled values]]\n{rescaled}"
+
 def _multiband_fit_objective(pars, prepared_datasets):
     """Objective function for multiband fitting."""
     v = pars.valuesdict()
     params = _rescale_multiband_params(*v.values())
-    # n_bands = len([k for k in v.keys() if k.startswith('n')])
-
-    # # Extract and rescale parameters
-    # param_values = [v[f'n{i+1}'] for i in range(n_bands)] + \
-    #                [v[f'mu{i+1}'] for i in range(n_bands)]
-    # rescaled = _rescale_multiband_params(*param_values)
-
-    # # Interleave to (n1, mu1, n2, mu2, ...) format
-    # params_interleaved = []
-    # for i in range(n_bands):
-    #     params_interleaved.append(rescaled[i])  # ni
-    #     params_interleaved.append(rescaled[n_bands + i])  # mui
 
     all_residuals = []
     for field, rho, eq, sigma in prepared_datasets:
         if field.size == 0:
             continue
 
-        model = eq(field, *params) # params_interleaved
+        model = eq(field, *params)
         resid = model - rho
 
         if sigma is not None:
@@ -280,6 +277,7 @@ def _create_multiband_fit_parameters(n_bands: int,
     n0_vals = p0[0::2]
     mu0_vals = p0[1::2]
 
+    param_names = _multiband_param_names(n_bands)
     params = lmfit.Parameters()
 
     # Add parameters with log scaling
@@ -287,68 +285,73 @@ def _create_multiband_fit_parameters(n_bands: int,
         params.add(f'n{i+1}', value=np.log10(n0_vals[i]))
         params.add(f'mu{i+1}', value=np.log10(mu0_vals[i]))
 
-    # Set default bounds if none provided
-    if bounds is None:
-        default_bounds = {
-            **{f'n{i+1}': (1e20, 1e28) for i in range(n_bands)},  # m^-3
-            **{f'mu{i+1}': (0.001, 1) for i in range(n_bands)}    # m^2/Vs
-        }
-        bounds = default_bounds
-
-    # Apply bounds
-    if isinstance(bounds, dict):
-        for param_name, bound in bounds.items():
-            if param_name in params and bound is not None:
-                lb, ub = bound
-                if lb is not None:
-                    params[param_name].set(min=np.log10(lb))
-                if ub is not None:
-                    params[param_name].set(max=np.log10(ub))
-    else:
-        # Tuple format: (lower_bounds, upper_bounds)
-        lb_seq, ub_seq = bounds
-        param_names = [f'{qty}{i+1}' for i in range(n_bands) for qty in ['n', 'mu']]
-
-        if lb_seq is not None:
-            for param_name, lb in zip(param_names, lb_seq):
-                if lb is not None:
-                    params[param_name].set(min=np.log10(lb))
-
-        if ub_seq is not None:
-            for param_name, ub in zip(param_names, ub_seq):
-                if ub is not None:
-                    params[param_name].set(max=np.log10(ub))
+    # Apply bounds, falling back to the defaults for anything left unspecified
+    default_bounds = {
+        **{f'n{i+1}': (1e20, 1e28) for i in range(n_bands)},  # m^-3
+        **{f'mu{i+1}': (0.001, 1) for i in range(n_bands)}    # m^2/Vs
+    }
+    bounds = _normalize_multiband_bounds(bounds, param_names)
+    for param_name in param_names:
+        lb, ub = bounds.get(param_name) or (None, None)
+        default_lb, default_ub = default_bounds[param_name]
+        params[param_name].set(min=np.log10(default_lb if lb is None else lb),
+                               max=np.log10(default_ub if ub is None else ub))
 
     # Apply expressions (constraints)
     if expr is not None:
+        _validate_multiband_param_names(expr, param_names, 'expr')
         for param_name, expression in expr.items():
-            if param_name in params:
-                params[param_name].set(expr=expression)
+            params[param_name].set(expr=expression)
 
     # Apply fixed parameters
     if fix_params is not None:
         if isinstance(fix_params, dict):
-            for p, val in fix_params.items():
-                if p in params:
-                    params[p].set(vary=not val)
+            _validate_multiband_param_names(fix_params, param_names, 'fix_params')
         else:
             # Array format: interleaved [n1, mu1, n2, mu2, ...]
-            param_names = [f'{qty}{i+1}' for i in range(n_bands) for qty in ['n', 'mu']]
-            for p, val in zip(param_names, fix_params):
-                params[p].set(vary=not val)
+            fix_params = dict(zip(param_names, fix_params))
+        for param_name, val in fix_params.items():
+            params[param_name].set(vary=not val)
 
     # Apply brute_step
     if brute_step is not None:
         if isinstance(brute_step, dict):
-            for param_name, step in brute_step.items():
-                if param_name in params:
-                    params[param_name].set(brute_step=step)
+            _validate_multiband_param_names(brute_step, param_names, 'brute_step')
         else:
             # Single float applied to all parameters
-            for param_name in params:
-                params[param_name].set(brute_step=brute_step)
+            brute_step = dict.fromkeys(param_names, brute_step)
+        for param_name, step in brute_step.items():
+            params[param_name].set(brute_step=step)
 
     return params
+
+def _multiband_param_names(n_bands: int) -> list[str]:
+    """Parameter names in the interleaved order n1, mu1, n2, mu2, ..."""
+    return [f'{qty}{i+1}' for i in range(n_bands) for qty in ('n', 'mu')]
+
+def _validate_multiband_param_names(mapping: dict, param_names: list[str], arg_name: str) -> None:
+    """Reject parameter names that no band provides, so typos are not silently ignored."""
+    unknown = [name for name in mapping if name not in param_names]
+    if unknown:
+        raise ValueError(f"Unknown parameter name(s) in {arg_name}: {', '.join(unknown)}; "
+                         f"expected any of {', '.join(param_names)}")
+
+def _normalize_multiband_bounds(bounds: Optional[Union[dict, tuple]],
+                                param_names: list[str]) -> dict:
+    """Bring both accepted bounds formats to {name: (lower, upper)}."""
+    if bounds is None:
+        return {}
+
+    if isinstance(bounds, dict):
+        _validate_multiband_param_names(bounds, param_names, 'bounds')
+        return bounds
+
+    # Tuple format: (lower_bounds, upper_bounds), each interleaved like p0
+    lb_seq, ub_seq = bounds
+    none_seq = [None] * len(param_names)
+    lb_seq = none_seq if lb_seq is None else lb_seq
+    ub_seq = none_seq if ub_seq is None else ub_seq
+    return {name: (lb, ub) for name, lb, ub in zip(param_names, lb_seq, ub_seq)}
 
 def _prepare_multiband_datasets(datasets: list[tuple],
                                 bands: str,
