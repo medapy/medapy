@@ -69,7 +69,7 @@ def generate_multiband_eq(kind: str, bands: str):
     """
     kind = validations.validate_option(kind, ['xx', 'xy'], 'kind')
     bands = _validate_band_notes(bands)
-    band_signs = list(map(_band_note_to_sign, bands))
+    band_signs = _band_signs(bands)
     n_bands = len(band_signs)
 
     def multiband_equation(field, *params):
@@ -78,27 +78,8 @@ def generate_multiband_eq(kind: str, bands: str):
         if len(params) != expected_params:
             raise ValueError(f"Expected {expected_params} parameters for {n_bands} bands, got {len(params)}")
 
-        # Unpack interleaved parameters: n1, mu1, n2, mu2, ...
-        n_values = params[0::2]
-        mu_values = params[1::2]
-
-        # Calculate conductivity tensor components
-        sigma_xx = 0.0
-        sigma_xy = 0.0
-        for i in range(n_bands):
-            sigma_i = e * n_values[i] * mu_values[i]
-            mu_B = mu_values[i] * field
-            denom = 1.0 + mu_B**2
-
-            sigma_xx += sigma_i / denom
-            sigma_xy += band_signs[i] * sigma_i * mu_B / denom
-
-        # Convert to resistivity tensor
-        denominator = sigma_xx**2 + sigma_xy**2
-        if kind == 'xx':
-            return sigma_xx / denominator
-        else: # xy
-            return sigma_xy / denominator
+        sigma_xx, sigma_xy, denominator = _conductivity_tensor(field, band_signs, params)
+        return _resistivity_from_tensor(kind, sigma_xx, sigma_xy, denominator)
 
     return multiband_equation
 
@@ -192,6 +173,9 @@ def fit_multiband(datasets: list[tuple],
     fit_kwargs = fit_kwargs or {}
 
     # Input validation
+    if len(datasets) == 0:
+        raise ValueError("datasets must contain at least one (field, rho, kind) tuple")
+
     bands = _validate_band_notes(bands)
     n_bands = len(bands)
     expected_params = 2 * n_bands
@@ -206,14 +190,14 @@ def fit_multiband(datasets: list[tuple],
     handle_na = validations.validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
 
     # Prepare datasets
-    prepared_datasets = _prepare_multiband_datasets(datasets, bands, handle_na)
+    groups = _prepare_multiband_datasets(datasets, handle_na)
 
     # Create parameters
     params = _create_multiband_fit_parameters(n_bands, p0, bounds, fix_params, expr, brute_step)
 
     # Perform the fit
     res = lmfit.minimize(_multiband_fit_objective, params,
-                         args=(prepared_datasets,),
+                         args=(_band_signs(bands), groups, len(datasets)),
                          method=method,
                          **fit_kwargs)
 
@@ -242,25 +226,25 @@ def _multiband_fit_report(res: lmfit.minimizer.MinimizerResult, p: tuple, bands:
     rescaled = textwrap.indent(multiband_fit_to_str(p, bands), '    ')
     return f"{lmfit.fit_report(res)}\n[[Rescaled values]]\n{rescaled}"
 
-def _multiband_fit_objective(pars, prepared_datasets):
+def _multiband_fit_objective(pars, band_signs, groups, n_datasets):
     """Objective function for multiband fitting."""
     v = pars.valuesdict()
     params = _rescale_multiband_params(*v.values())
 
-    all_residuals = []
-    for field, rho, eq, sigma in prepared_datasets:
-        if field.size == 0:
-            continue
+    # Slot residuals by dataset index to keep the concatenation in the caller's order
+    residuals = [None] * n_datasets
+    for field, members in groups:
+        tensor = _conductivity_tensor(field, band_signs, params)
 
-        model = eq(field, *params)
-        resid = model - rho
+        for idx, rho, kind, sigma in members:
+            resid = _resistivity_from_tensor(kind, *tensor) - rho
 
-        if sigma is not None:
-            resid = resid / sigma
+            if sigma is not None:
+                resid = resid / sigma
 
-        all_residuals.append(resid)
+            residuals[idx] = resid
 
-    return np.concatenate(all_residuals)
+    return np.concatenate(residuals)
 
 def _rescale_multiband_params(*params) -> tuple:
     """Convert parameters from log scale back to linear scale."""
@@ -354,19 +338,24 @@ def _normalize_multiband_bounds(bounds: Optional[Union[dict, tuple]],
     return {name: (lb, ub) for name, lb, ub in zip(param_names, lb_seq, ub_seq)}
 
 def _prepare_multiband_datasets(datasets: list[tuple],
-                                bands: str,
                                 handle_na: str) -> list[tuple]:
     """
-    Prepare and validate datasets for multiband fitting.
+    Prepare and validate datasets for multiband fitting, grouped by field grid.
+
+    Datasets sharing a field grid evaluate the conductivity tensor once between them.
+    Grouping happens after cleaning because `handle_na='exclude'` drops NaN rows per
+    dataset and can pull apart grids that were identical on input.
 
     Returns
     -------
     list of tuples
-        Each tuple contains (field, rho, equation, sigma)
+        Each tuple contains (field, members), where members is a list of
+        (index, rho, kind, sigma) sharing that field grid. The index is the dataset's
+        position in `datasets`, so residuals can be restored to the caller's order.
     """
-    prepared = []
+    groups = []
 
-    for dataset in datasets:
+    for idx, dataset in enumerate(datasets):
         if len(dataset) == 3:
             field, rho, kind = dataset
             sigma = None
@@ -391,12 +380,15 @@ def _prepare_multiband_datasets(datasets: list[tuple],
                 raise ValueError(f"sigma must be scalar or match rho size ({rho.size}); "
                                f"got {sigma.size}")
 
-        # Generate equation for this dataset
-        eq = generate_multiband_eq(kind, bands)
+        member = (idx, rho, kind, sigma)
+        for group_field, members in groups:
+            if np.array_equal(group_field, field):
+                members.append(member)
+                break
+        else:
+            groups.append((field, [member]))
 
-        prepared.append((field, rho, eq, sigma))
-
-    return prepared
+    return groups
 
 def _validate_band_notes(bands, number=None):
     """
@@ -449,6 +441,38 @@ def _band_note_to_sign(band_note: str) -> int:
         return 1
     elif band_note == 'e':
         return -1
+
+def _band_signs(bands: str) -> list[int]:
+    return list(map(_band_note_to_sign, bands))
+
+def _conductivity_tensor(field, band_signs: list[int], params) -> tuple:
+    """Conductivity tensor components and the resistivity denominator on one field grid.
+
+    Both components are needed for either resistivity, so 'xx' and 'xy' data measured
+    on the same grid can share a single call.
+    """
+    # Unpack interleaved parameters: n1, mu1, n2, mu2, ...
+    n_values = params[0::2]
+    mu_values = params[1::2]
+
+    sigma_xx = 0.0
+    sigma_xy = 0.0
+    for i, sign in enumerate(band_signs):
+        sigma_i = e * n_values[i] * mu_values[i]
+        mu_B = mu_values[i] * field
+        denom = 1.0 + mu_B**2
+
+        sigma_xx += sigma_i / denom
+        sigma_xy += sign * sigma_i * mu_B / denom
+
+    return sigma_xx, sigma_xy, sigma_xx**2 + sigma_xy**2
+
+def _resistivity_from_tensor(kind: str, sigma_xx, sigma_xy, denominator):
+    """Invert the conductivity tensor for one measurement kind."""
+    if kind == 'xx':
+        return sigma_xx / denominator
+    else:  # xy
+        return sigma_xy / denominator
 
 def hall_fit_to_str(p, x_unit='T', y_unit='ohm*m', n=None, n_unit='m^-3'):
     str_res = (f'a0 = {p[0]:.2e} {y_unit}\n'

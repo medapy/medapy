@@ -285,6 +285,13 @@ class TestFitMultiband:
         with pytest.raises(ValueError, match="positive"):
             etr.fit_multiband(datasets, p0, bands='he')
 
+    def test_empty_datasets(self):
+        """Test that an empty datasets list raises error."""
+        p0 = [1e26, 0.015, 5e25, 0.02]
+
+        with pytest.raises(ValueError, match="at least one"):
+            etr.fit_multiband([], p0, bands='he')
+
     def test_invalid_dataset_format(self):
         """Test that invalid dataset format raises error."""
         field = np.linspace(-10, 10, 50)
@@ -308,6 +315,117 @@ class TestFitMultiband:
         captured = capsys.readouterr()
         assert 'n1' in captured.out
         assert 'mu1' in captured.out
+
+
+class TestMultibandGridGrouping:
+    """Tests for sharing the conductivity tensor between datasets on one field grid."""
+
+    @staticmethod
+    def _curves(field, bands, p_true, noise_rel=2e-3, seed=1):
+        """Noisy rho_xx and rho_xy for a band configuration."""
+        rng = np.random.default_rng(seed)
+        curves = {}
+        for kind in ('xx', 'xy'):
+            clean = etr.generate_multiband_eq(kind, bands)(field, *p_true)
+            curves[kind] = clean + rng.normal(0, noise_rel * np.std(clean), field.size)
+        return curves
+
+    def test_shared_grid_forms_one_group(self):
+        """Datasets on the same field array are grouped together."""
+        field = np.linspace(-14, 14, 101)
+        curves = self._curves(field, 'he', [5e25, 0.05, 4.5e25, 0.30])
+
+        datasets = [(field, curves['xy'], 'xy'), (field, curves['xx'], 'xx')]
+        groups = etr._prepare_multiband_datasets(datasets, 'raise')
+
+        assert len(groups) == 1
+        _, members = groups[0]
+        assert len(members) == 2
+
+    def test_distinct_grids_stay_separate(self):
+        """Datasets on different field arrays are not merged."""
+        field_a = np.linspace(-14, 14, 101)
+        field_b = np.linspace(-9, 9, 101)
+        curves_a = self._curves(field_a, 'he', [5e25, 0.05, 4.5e25, 0.30])
+        curves_b = self._curves(field_b, 'he', [5e25, 0.05, 4.5e25, 0.30])
+
+        datasets = [(field_a, curves_a['xy'], 'xy'), (field_b, curves_b['xx'], 'xx')]
+        groups = etr._prepare_multiband_datasets(datasets, 'raise')
+
+        assert len(groups) == 2
+        assert all(len(members) == 1 for _, members in groups)
+
+    def test_excluded_na_splits_grid(self):
+        """handle_na='exclude' drops rows per dataset, so grids must regroup after cleaning."""
+        field = np.linspace(-14, 14, 101)
+        curves = self._curves(field, 'he', [5e25, 0.05, 4.5e25, 0.30])
+        rho_xy = curves['xy'].copy()
+        rho_xy[10] = np.nan  # only this dataset loses a point
+
+        datasets = [(field, rho_xy, 'xy'), (field, curves['xx'], 'xx')]
+        groups = etr._prepare_multiband_datasets(datasets, 'exclude')
+
+        assert len(groups) == 2
+        sizes = sorted(group_field.size for group_field, _ in groups)
+        assert sizes == [100, 101]
+
+    def test_residual_order_follows_dataset_order(self):
+        """Residuals are concatenated in the caller's dataset order, not group order."""
+        field_a = np.linspace(-14, 14, 51)
+        field_b = np.linspace(-9, 9, 31)
+        p_true = [5e25, 0.05, 4.5e25, 0.30]
+        curves_a = self._curves(field_a, 'he', p_true)
+        curves_b = self._curves(field_b, 'he', p_true)
+
+        # Interleaved so that grouping by grid would reorder a naive concatenation
+        datasets = [(field_a, curves_a['xy'], 'xy'),
+                    (field_b, curves_b['xx'], 'xx'),
+                    (field_a, curves_a['xx'], 'xx')]
+
+        groups = etr._prepare_multiband_datasets(datasets, 'raise')
+        params = etr._create_multiband_fit_parameters(2, np.asarray(p_true),
+                                                      None, None, None, None)
+        resid = etr._multiband_fit_objective(params, etr._band_signs('he'),
+                                             groups, len(datasets))
+
+        expected = np.concatenate([
+            etr.generate_multiband_eq(kind, 'he')(f, *p_true) - rho
+            for f, rho, kind in datasets
+        ])
+        np.testing.assert_allclose(resid, expected)
+
+    @pytest.mark.parametrize('bands, p_true, p0', [
+        # near-compensated: strongly non-linear Hall, pronounced multiband signature
+        ('he', [5.0e25, 0.05, 4.5e25, 0.30], [2.0e25, 0.02, 2.0e25, 0.10]),
+        # 1% minority carrier with a nearby mobility: nearly single-band in appearance
+        ('he', [1.0e26, 0.020, 1.0e24, 0.030], [5.0e25, 0.010, 5.0e24, 0.015]),
+        ('hee', [6.0e25, 0.04, 3.0e25, 0.25, 2.0e25, 0.12],
+                [2.0e25, 0.02, 2.0e25, 0.10, 2.0e25, 0.05]),
+    ])
+    def test_joint_fit_recovers_parameters(self, bands, p_true, p0):
+        """A shared-grid xx+xy fit recovers the true parameters on a large dataset."""
+        field = np.linspace(-14, 14, 10_000)
+        curves = self._curves(field, bands, p_true)
+
+        datasets = [(field, curves['xy'], 'xy'), (field, curves['xx'], 'xx')]
+        result = etr.fit_multiband(datasets, p0, bands=bands)
+
+        np.testing.assert_allclose(result, p_true, rtol=0.05)
+
+    def test_repeated_kind_on_shared_grid(self):
+        """Several datasets of the same kind on one grid share the tensor and still fit."""
+        field = np.linspace(-14, 14, 1000)
+        p_true = [5e25, 0.05, 4.5e25, 0.30]
+        curves_1 = self._curves(field, 'he', p_true, seed=1)
+        curves_2 = self._curves(field, 'he', p_true, seed=2)
+
+        datasets = [(field, curves_1['xy'], 'xy'), (field, curves_2['xy'], 'xy'),
+                    (field, curves_1['xx'], 'xx'), (field, curves_2['xx'], 'xx')]
+        groups = etr._prepare_multiband_datasets(datasets, 'raise')
+        assert len(groups) == 1
+
+        result = etr.fit_multiband(datasets, [2e25, 0.02, 2e25, 0.10], bands='he')
+        np.testing.assert_allclose(result, p_true, rtol=0.05)
 
 
 class TestMultibandFitToStr:
