@@ -34,6 +34,8 @@ class TestElectricalTransportAccessorBasics:
         assert hasattr(df.etr, 'fit_linhall')
         assert hasattr(df.etr, 'fit_twoband')
         assert hasattr(df.etr, 'calculate_twoband')
+        assert hasattr(df.etr, 'fit_multiband')
+        assert hasattr(df.etr, 'calculate_multiband')
 
 
 class TestR2Rho:
@@ -361,6 +363,197 @@ class TestFitTwoband:
             assert 'Resistivity_fithe' in df.columns
         except Exception:
             pytest.skip("Two-band fit requires more realistic data")
+
+
+TRUE_PARAMS = (2.5e25, 0.011, 4.8e24, 0.019)  # n1, mu1, n2, mu2
+
+
+@pytest.fixture
+def multiband_df():
+    """Measurement sheet holding noisy 'he' two-band rho_xx and rho_xy vs field."""
+    field = np.linspace(-14, 14, 61)
+    eq_xy = etr.generate_multiband_eq('xy', 'he')
+    eq_xx = etr.generate_multiband_eq('xx', 'he')
+
+    rng = np.random.default_rng(0)
+    rho_xy = eq_xy(field, *TRUE_PARAMS) + rng.normal(0, 2e-9, field.size)
+    rho_xx = eq_xx(field, *TRUE_PARAMS) + rng.normal(0, 2e-10, field.size)
+
+    df = pd.DataFrame({'Field (T)': field,
+                       'rho_xx (ohm*m)': rho_xx,
+                       'rho_xy (ohm*m)': rho_xy})
+    df.ms.init_msheet()
+    df.ms.set_as_y('rho_xy')
+    return df
+
+
+class TestFitMultiband:
+    """Test fit_multiband (arbitrary band count fitting) method."""
+
+    def test_joint_fit_recovers_parameters(self, multiband_df):
+        """Test that fitting xx and xy together recovers the true parameters."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, _ = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                  kinds=['xy', 'xx'], bands='he')
+
+        assert isinstance(coefs, tuple)
+        assert len(coefs) == 4
+        assert coefs == pytest.approx(TRUE_PARAMS, rel=0.05)
+
+    def test_fit_uses_y_axis_by_default(self, multiband_df):
+        """Test that omitting cols fits the y-axis column."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, kinds='xy', bands='he')
+
+        assert len(coefs) == 4
+        assert 'rho_xy_mbndhe' in result.columns
+
+    def test_fit_adds_column_per_fitted_column(self, multiband_df):
+        """Test naming and units of the added fit columns."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                       kinds=['xy', 'xx'], bands='he',
+                                                       add_col='fit')
+
+        assert 'rho_xy_fithe' in result.columns
+        assert 'rho_xx_fithe' in result.columns
+        # Fit columns keep the units of their source column
+        assert result.ms.get_unit('rho_xy_fithe') == result.ms.get_unit('rho_xy')
+        # Fitted curves reproduce the data
+        assert result['rho_xy_fithe'].to_numpy() == pytest.approx(
+            result['rho_xy'].to_numpy(), abs=1e-8)
+
+    def test_fit_without_add_col(self, multiband_df):
+        """Test that add_col=None leaves the columns untouched."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, kinds='xy', bands='he',
+                                                       add_col=None)
+
+        assert list(result.columns) == ['Field', 'rho_xx', 'rho_xy']
+
+    def test_fit_with_field_range(self, multiband_df):
+        """Test that field_range restricts the fitted data but not the fit column."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                       kinds=['xy', 'xx'], bands='he',
+                                                       field_range=(-9, 9))
+
+        # Looser than the full-range fit: dropping the high-field data leaves the
+        # low-mobility band less well constrained
+        assert coefs == pytest.approx(TRUE_PARAMS, rel=0.2)
+        # Fit column still spans the full field range
+        assert len(result['rho_xy_mbndhe']) == len(multiband_df)
+        assert result['rho_xy_mbndhe'].notna().all()
+
+    def test_fit_with_sigmas(self, multiband_df):
+        """Test per-column uncertainty weighting."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, _ = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                  kinds=['xy', 'xx'], bands='he',
+                                                  sigmas=[2e-9, 2e-10])
+
+        assert coefs == pytest.approx(TRUE_PARAMS, rel=0.05)
+
+    def test_fit_sigmas_length_mismatch(self, multiband_df):
+        """Test that a sigma per column is required when fitting several columns."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        with pytest.raises(ValueError, match="one per column"):
+            multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                           kinds=['xy', 'xx'], bands='he',
+                                           sigmas=2e-9)
+
+    def test_fit_three_bands(self, multiband_df):
+        """Test that a three-band fit returns six parameters."""
+        p0 = [1e26, 0.015, 1e25, 0.02, 5e24, 0.01]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                       kinds=['xy', 'xx'], bands='hee')
+
+        assert len(coefs) == 6
+        assert 'rho_xy_mbndhee' in result.columns
+
+    def test_fit_passes_kwargs_to_transport(self, multiband_df):
+        """Test that fitting kwargs reach transport.fit_multiband."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        # Charge compensation constraint (expressions live in log10 space)
+        coefs, _ = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                  kinds=['xy', 'xx'], bands='he',
+                                                  expr={'n2': 'n1'})
+
+        n1, _, n2, _ = coefs
+        assert n1 == pytest.approx(n2, rel=1e-6)
+
+    def test_fit_with_axes_and_labels(self, multiband_df):
+        """Test axis and label assignment for the new columns."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+                                                       kinds=['xy', 'xx'], bands='he',
+                                                       add_labels=['fxy', 'fxx'])
+
+        assert result.ms.labels['fxy'] == 'rho_xy_mbndhe'
+        assert result.ms.labels['fxx'] == 'rho_xx_mbndhe'
+
+    def test_fit_inplace(self, multiband_df):
+        """Test fit_multiband with inplace=True."""
+        p0 = [1e26, 0.015, 1e25, 0.02]
+
+        coefs, result = multiband_df.etr.fit_multiband(p0, kinds='xy', bands='he',
+                                                       inplace=True)
+
+        assert result is None
+        assert 'rho_xy_mbndhe' in multiband_df.columns
+
+
+class TestCalculateMultiband:
+    """Test calculate_multiband method."""
+
+    def test_calculate_multiple_columns(self, multiband_df):
+        """Test that the model is evaluated for each column with its own kind."""
+        result = multiband_df.etr.calculate_multiband(TRUE_PARAMS,
+                                                      cols=['rho_xy', 'rho_xx'],
+                                                      kinds=['xy', 'xx'], bands='he')
+
+        assert 'rho_xy_mbndhe' in result.columns
+        assert 'rho_xx_mbndhe' in result.columns
+        # Model reproduces the noiseless data it was generated from
+        assert result['rho_xy_mbndhe'].to_numpy() == pytest.approx(
+            result['rho_xy'].to_numpy(), abs=1e-8)
+        assert result['rho_xx_mbndhe'].to_numpy() == pytest.approx(
+            result['rho_xx'].to_numpy(), abs=1e-9)
+
+    def test_calculate_preserves_units(self, multiband_df):
+        """Test that calculated columns keep the units of their source column."""
+        result = multiband_df.etr.calculate_multiband(TRUE_PARAMS, cols='rho_xx',
+                                                      kinds='xx', bands='he')
+
+        assert result.ms.get_unit('rho_xx_mbndhe') == result.ms.get_unit('rho_xx')
+
+    def test_calculate_with_append_and_labels(self, multiband_df):
+        """Test custom suffix and label assignment."""
+        result = multiband_df.etr.calculate_multiband(TRUE_PARAMS, cols='rho_xy',
+                                                      kinds='xy', bands='he',
+                                                      append='model', add_labels='mdl')
+
+        assert 'rho_xy_modelhe' in result.columns
+        assert result.ms.labels['mdl'] == 'rho_xy_modelhe'
+
+    def test_calculate_inplace(self, multiband_df):
+        """Test calculate_multiband with inplace=True."""
+        result = multiband_df.etr.calculate_multiband(TRUE_PARAMS, cols='rho_xy',
+                                                      kinds='xy', bands='he',
+                                                      inplace=True)
+
+        assert result is None
+        assert 'rho_xy_mbndhe' in multiband_df.columns
 
 
 class TestCalculateTwoband:

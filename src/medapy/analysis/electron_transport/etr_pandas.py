@@ -52,6 +52,11 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
     >>> p0 = [1e26, 1e25, 0.015, 0.02]  # [n1, n2, mu1, mu2]
     >>> p_opt, _ = df.etr.fit_twoband(p0, col='rho_xy', kind='xy',
     ...                                bands='he', inplace=True)
+    >>> # Fit any number of bands to Hall and magnetoresistance jointly
+    >>> p0 = [1e26, 0.015, 1e25, 0.02]  # [n1, mu1, n2, mu2] - interleaved
+    >>> p_opt, _ = df.etr.fit_multiband(p0, cols=['rho_xy', 'rho_xx'],
+    ...                                  kinds=['xy', 'xx'], bands='he',
+    ...                                  inplace=True)
 
     See Also
     --------
@@ -394,6 +399,246 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
             df.ms._set_column_state(new_col, new_values, unit, set_axis, add_label)
 
         return coefs, self._if_inplace(df, inplace)
+
+    def fit_multiband(self,
+                      p0: npt.ArrayLike,
+                      cols: str | list[str] | None = None,
+                      *,
+                      kinds: str | list[str],
+                      bands: str,
+                      sigmas: float | npt.ArrayLike | list | None = None,
+                      field_range: npt.ArrayLike | None = None,
+                      inside_range: bool = True,
+                      add_col: str | None = 'mbnd',
+                      set_axes: str | list[str] | None = None,
+                      add_labels: str | list[str] | None = None,
+                      inplace: bool = False,
+                      **kwargs) -> tuple[tuple, pd.DataFrame | None]:
+        """
+        Fit an arbitrary number of bands to one or several resistivity columns.
+
+        All columns are fitted simultaneously against the shared x-axis (field) with a
+        single set of carrier densities and mobilities, which is what makes a joint
+        Hall + magnetoresistance fit well conditioned.
+
+        Parameters
+        ----------
+        p0 : array-like
+            Initial guess, interleaved as [n1, mu1, n2, mu2, ...] in SI units:
+            - n: carrier densities (m^-3)
+            - mu: mobilities (m^2/(V·s))
+            Note that this ordering differs from `fit_twoband`, which takes
+            [n1, n2, mu1, mu2].
+        cols : str or list of str, optional
+            Column(s) or label(s) holding the resistivity data. If None, uses the
+            y-axis column.
+        kinds : str or list of str
+            Measurement type of each column: 'xx' (magnetoresistance) or 'xy' (Hall).
+            A single value is applied to all columns.
+        bands : str
+            Band configuration, 'h' for holes and 'e' for electrons, one character
+            per band: 'he' (2 bands), 'heh' (3 bands), 'ehee' (4 bands).
+        sigmas : float, array-like, or list, optional
+            Measurement uncertainties used to weight the fit. Either one spec per
+            column (each a scalar or a per-point array), or a single scalar/array when
+            fitting one column. Per-point arrays must match the data after
+            `field_range` selection.
+        field_range : array-like of length 2, optional
+            Magnetic field range (min, max) to fit. If None, uses all data.
+        inside_range : bool, default True
+            If True, fit data inside field_range. If False, fit outside.
+        add_col : str, default 'mbnd'
+            Suffix for the new columns holding the fitted curves, one per fitted
+            column. If None, no columns are added.
+        set_axes : str or list of str, optional
+            Axis assignment for the new columns.
+        add_labels : str or list of str, optional
+            Label(s) for the new columns.
+        inplace : bool, default False
+            If True, modify DataFrame in place.
+        **kwargs
+            Additional arguments passed to `transport.fit_multiband`, such as
+            `bounds`, `fix_params`, `expr`, `method` or `report`.
+
+        Returns
+        -------
+        coefs : tuple
+            Optimized parameters (n1, mu1, n2, mu2, ...) in SI units.
+        df : pd.DataFrame or None
+            Modified DataFrame if inplace=False, None otherwise.
+
+        Examples
+        --------
+        >>> # Joint fit of Hall and magnetoresistance with a hole and an electron band
+        >>> p0 = [1e26, 0.015, 1e25, 0.02]  # n1, mu1, n2, mu2
+        >>> p_opt, _ = df.etr.fit_multiband(
+        ...     p0,
+        ...     cols=['rho_xy', 'rho_xx'],
+        ...     kinds=['xy', 'xx'],
+        ...     bands='he',
+        ...     report=True,
+        ...     inplace=True
+        ... )
+        >>> n1, mu1, n2, mu2 = p_opt
+        >>> # Three bands, Hall only, with charge compensation (expr is in log10 space)
+        >>> p0 = [1e26, 0.01, 5e25, 0.02, 2e25, 0.015]
+        >>> p_opt, _ = df.etr.fit_multiband(
+        ...     p0,
+        ...     cols='rho_xy',
+        ...     kinds='xy',
+        ...     bands='hee',
+        ...     field_range=(-9, 9),
+        ...     expr={'n2': 'n1'},
+        ...     inplace=True
+        ... )
+
+        See Also
+        --------
+        calculate_multiband : Evaluate the multiband model with known parameters
+        fit_twoband : Two-band fit of a single column
+        """
+        # Default to y axis column if None provided
+        cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
+        n_cols = len(cols)
+
+        # Prepare per-column fit inputs
+        kinds = self._prepare_values_list(kinds, default=None, n=n_cols)
+        sigmas = self._prepare_sigmas(sigmas, n_cols)
+
+        # Work with particular columns
+        data = self._obj
+        if field_range is not None:
+            data = processing.select_range_df(data, self.col_x, field_range,
+                                              inside_range=inside_range)
+        field = data[self.col_x]
+
+        datasets = [(field, data[col], kind) if sigma is None
+                    else (field, data[col], kind, sigma)
+                    for col, kind, sigma in zip(cols, kinds, sigmas)]
+
+        # Calculate fit coefficients
+        coefs = etr.fit_multiband(datasets, p0, bands=bands, **kwargs)
+
+        # Work on a copy of the data
+        df = self._get_df_copy()
+
+        if add_col:
+            # Prepare other parameters
+            # keep existing units
+            units = self._prepare_values_list(cols, default='', func=self.ms.get_unit, n=n_cols)
+            set_axes = self._prepare_values_list(set_axes, default=None, n=n_cols)
+            add_labels = self._prepare_values_list(add_labels, default=None, n=n_cols)
+
+            # Generate new column names
+            new_cols = [self._col_name_append(col, f'{add_col}{bands}') for col in cols]
+
+            # Calculate fit values over the full x range
+            new_values = [etr.generate_multiband_eq(kind, bands)(df.ms.x, *coefs)
+                          for kind in kinds]
+
+            # Assign values and metadata
+            df.ms._set_column_states(
+                columns=new_cols,
+                values=new_values,
+                units=units,
+                axes=set_axes,
+                labels=add_labels)
+
+        return coefs, self._if_inplace(df, inplace)
+
+    def calculate_multiband(self,
+                            p: npt.ArrayLike,
+                            cols: str | list[str] | None = None,
+                            *,
+                            kinds: str | list[str],
+                            bands: str,
+                            append: str = 'mbnd',
+                            set_axes: str | list[str] | None = None,
+                            add_labels: str | list[str] | None = None,
+                            inplace: bool = False
+                            ) -> pd.DataFrame | None:
+        """
+        Evaluate the multiband model with known parameters.
+
+        Parameters
+        ----------
+        p : array-like
+            Parameters interleaved as [n1, mu1, n2, mu2, ...] in SI units
+            (densities in m^-3, mobilities in m^2/(V·s)).
+        cols : str or list of str, optional
+            Column(s) whose names and units the calculated columns are derived from.
+            If None, uses the y-axis column.
+        kinds : str or list of str
+            Model to evaluate for each column: 'xx' or 'xy'.
+        bands : str
+            Band configuration, e.g. 'he' or 'hee'.
+        append : str, default 'mbnd'
+            Suffix for the new columns.
+        set_axes : str or list of str, optional
+            Axis assignment for the new columns.
+        add_labels : str or list of str, optional
+            Label(s) for the new columns.
+        inplace : bool, default False
+            If True, modify DataFrame in place.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Modified DataFrame if inplace=False, None otherwise.
+
+        Examples
+        --------
+        >>> p = [2.5e25, 0.011, 4.8e24, 0.019]  # n1, mu1, n2, mu2
+        >>> df.etr.calculate_multiband(p, cols=['rho_xy', 'rho_xx'],
+        ...                            kinds=['xy', 'xx'], bands='he', inplace=True)
+
+        See Also
+        --------
+        fit_multiband : Fit the multiband model to measured data
+        """
+        # Default to y axis column if None provided
+        cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
+        n_cols = len(cols)
+
+        # Prepare other parameters
+        # keep existing units
+        units = self._prepare_values_list(cols, default='', func=self.ms.get_unit, n=n_cols)
+        set_axes = self._prepare_values_list(set_axes, default=None, n=n_cols)
+        add_labels = self._prepare_values_list(add_labels, default=None, n=n_cols)
+        kinds = self._prepare_values_list(kinds, default=None, n=n_cols)
+
+        # Generate new column names
+        new_cols = [self._col_name_append(col, append + bands) for col in cols]
+
+        # Work on a copy of the data
+        df = self._get_df_copy()
+
+        # Calculate model values
+        new_values = [etr.generate_multiband_eq(kind, bands)(self.x, *p) for kind in kinds]
+
+        # Assign values and metadata
+        df.ms._set_column_states(
+            columns=new_cols,
+            values=new_values,
+            units=units,
+            axes=set_axes,
+            labels=add_labels)
+
+        return self._if_inplace(df, inplace)
+
+    @staticmethod
+    def _prepare_sigmas(sigmas: float | npt.ArrayLike | list | None, n: int) -> list:
+        """Prepare one uncertainty spec (None, scalar or per-point array) per column."""
+        if sigmas is None:
+            return [None] * n
+        # A bare scalar or per-point array is only unambiguous for a single column
+        if isinstance(sigmas, (list, tuple)):
+            if len(sigmas) != n:
+                raise ValueError(f"Expected {n} sigmas, one per column; got {len(sigmas)}")
+            return list(sigmas)
+        if n > 1:
+            raise ValueError(f"sigmas must be a list of {n} items, one per column")
+        return [sigmas]
 
     def calculate_twoband(self,
                           p: tuple[float, float, float, float],
