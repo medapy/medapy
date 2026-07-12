@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from medapy.utils import misc
+from . import processing
 
 
 @pd.api.extensions.register_dataframe_accessor("proc")
@@ -96,8 +96,8 @@ class DataProcessingAccessor():
         return self.ms.axes['z']
 
     def check_monotonic(self, interrupt=False):
-        # check = misc.check_monotonic_df(self._obj, self.col_x, interrupt=False)
-        check = misc.check_monotonic_arr(self.x.values, interrupt=False)
+        # check = processing.check_monotonic_df(self._obj, self.col_x, interrupt=False)
+        check = processing.check_monotonic_arr(self.x.values, interrupt=False)
         if interrupt and check == 0:
             raise ValueError(f'Column `{self.col_x}` is not monotonic')
         return check
@@ -143,7 +143,7 @@ class DataProcessingAccessor():
         # Work on a copy of the data
         df = self._get_df_copy()
 
-        check = misc.check_monotonic_df(df, self.col_x, interrupt=False)
+        check = processing.check_monotonic_df(df, self.col_x, interrupt=False)
         if check == 0:
             raise ValueError(f'Column `{self.col_x}` is not monotonic')
         elif check == -1:
@@ -201,7 +201,7 @@ class DataProcessingAccessor():
         # Work on a copy of the data
         df = self._get_df_copy()
         # Get DataFrame with selected range
-        result = misc.select_range_df(df, self.col_x, val_range, inside_range, inclusive, handle_na)
+        result = processing.select_range_df(df, self.col_x, val_range, inside_range, inclusive, handle_na)
         # Alternative approach
         # df.drop(index=df.index.difference(result.index), inplace=True)
         result.reset_index(drop=True, inplace=True)
@@ -218,7 +218,7 @@ class DataProcessingAccessor():
         # Work on a copy of the data
         df = self._get_df_copy()
         # Get DataFrame with filtered range
-        result = misc.filter_range_df(df, self.col_x, val_range, inside_range, inclusive, handle_na)
+        result = processing.filter_range_df(df, self.col_x, val_range, inside_range, inclusive, handle_na)
         # Alternative approach
         # df.drop(index=df.index.difference(result.index), inplace=True)
         result.reset_index(drop=True, inplace=True)
@@ -256,7 +256,7 @@ class DataProcessingAccessor():
 
         Notes
         -----
-        See documentation for misc.symmetrize.
+        See documentation for processing.symmetrize.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -275,7 +275,7 @@ class DataProcessingAccessor():
         df = self._get_df_copy()
 
         # Calculate symmetrized values
-        new_values = [misc.symmetrize(df.ms[col]) for col in cols]
+        new_values = [processing.symmetrize(df.ms[col]) for col in cols]
 
         # Assign values and metadata
         df.ms._set_column_states(columns=new_cols,
@@ -317,7 +317,7 @@ class DataProcessingAccessor():
 
         Notes
         -----
-        See documentation for misc.antisymmetrize.
+        See documentation for processing.antisymmetrize.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -336,7 +336,7 @@ class DataProcessingAccessor():
         df = self._get_df_copy()
 
         # Calculate antisymmetrized values
-        new_values = [misc.antisymmetrize(df.ms[col]) for col in cols]
+        new_values = [processing.antisymmetrize(df.ms[col]) for col in cols]
 
         # Assign values and metadata
         df.ms._set_column_states(columns=new_cols,
@@ -382,7 +382,7 @@ class DataProcessingAccessor():
         Notes
         -----
         Resulting values are assumed to be dimensionless.
-        See documentation for misc.normalize.
+        See documentation for processing.normalize.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -400,7 +400,7 @@ class DataProcessingAccessor():
         df = self._get_df_copy()
 
         # Calculate normalized values
-        new_values = [misc.normalize(df.ms[col], by=by) for col in cols]
+        new_values = [processing.normalize(df.ms[col], by=by) for col in cols]
 
         # Assign values and metadata
         df.ms._set_column_states(columns=new_cols,
@@ -450,7 +450,7 @@ class DataProcessingAccessor():
 
         Notes
         -----
-        See documentation for misc.interpolate.
+        See documentation for processing.interpolate.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -460,7 +460,7 @@ class DataProcessingAccessor():
 
         # Calculate interpolated values
         new_values = [
-            misc.interpolate(
+            processing.interpolate(
                 x=df.ms.x,
                 y=df.ms[col],
                 x_new=x_new,
@@ -520,7 +520,7 @@ class DataProcessingAccessor():
         inplace : bool
             If True, modify the DataFrame in place and return None.
         **kwargs :
-            Additional arguments for misc.savgol_filter
+            Additional arguments for processing.savgol_filter
 
         Returns
         -------
@@ -529,7 +529,7 @@ class DataProcessingAccessor():
 
         Notes
         -----
-        See documentation for misc.savgol_filter.
+        See documentation for processing.savgol_filter.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -545,7 +545,7 @@ class DataProcessingAccessor():
         new_cols = [self._col_name_append(col, append) for col in cols]
 
 
-        # Create full dictionary of kwargs for misc.moving_average
+        # Create full dictionary of kwargs for processing.moving_average
         kwargs.update({'window': window, 'order': order,
                        'edge_mode': edge_mode, 'fill_values': fill_values})
 
@@ -553,7 +553,7 @@ class DataProcessingAccessor():
         df = self._get_df_copy()
 
         # Calculate moving average values
-        new_values = [misc.savgol_filter(df.ms[col], **kwargs) for col in cols]
+        new_values = [processing.savgol_filter(df.ms[col], **kwargs) for col in cols]
 
         if edge_mode == 'drop':
             half_window = window // 2
@@ -604,7 +604,7 @@ class DataProcessingAccessor():
         inplace : bool
             If True, modify the DataFrame in place and return None.
         **kwargs :
-            Additional arguments for misc.moving_average
+            Additional arguments for processing.moving_average
 
         Returns
         -------
@@ -613,7 +613,7 @@ class DataProcessingAccessor():
 
         Notes
         -----
-        See documentation for misc.moving_average.
+        See documentation for processing.moving_average.
         """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
@@ -628,14 +628,14 @@ class DataProcessingAccessor():
         # Generate new column names
         new_cols = [self._col_name_append(col, append) for col in cols]
 
-        # Create full dictionary of kwargs for misc.moving_average
+        # Create full dictionary of kwargs for processing.moving_average
         kwargs.update({'window': window, 'edge_mode': edge_mode, 'fill_values': fill_values})
 
         # Work on a copy of the data
         df = self._get_df_copy()
 
         # Calculate moving average values
-        new_values = [misc.moving_average(df.ms[col], **kwargs) for col in cols]
+        new_values = [processing.moving_average(df.ms[col], **kwargs) for col in cols]
 
         if edge_mode == 'drop':
             half_window = window // 2

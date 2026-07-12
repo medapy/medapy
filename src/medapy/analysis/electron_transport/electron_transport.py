@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import lmfit
 
-from medapy.utils import misc
+from medapy.utils import validations
 from medapy.utils.constants import e
 
 
@@ -33,7 +33,7 @@ def r2rho(r: npt.ArrayLike, kind: str, t: float, width: float = None, length: fl
     np.ndarray
         Resistivity values
     """
-    kind = misc._validate_option(kind, ['xx', 'xy'], 'kind')
+    kind = validations.validate_option(kind, ['xx', 'xy'], 'kind')
     r = np.asarray_chkfinite(r)
 
     if kind == 'xx':
@@ -66,7 +66,7 @@ def generate_multiband_eq(kind: str, bands: str):
     >>> eq_xy = generate_multiband_eq('xy', 'he')
     >>> rho_xy = eq_xy(field, n1, mu1, n2, mu2)
     """
-    kind = misc._validate_option(kind, ['xx', 'xy'], 'kind')
+    kind = validations.validate_option(kind, ['xx', 'xy'], 'kind')
     bands = _validate_band_notes(bands)
     band_signs = list(map(_band_note_to_sign, bands))
     n_bands = len(band_signs)
@@ -194,7 +194,7 @@ def fit_multiband(datasets: list[tuple],
     if np.any(p0 <= 0):
         raise ValueError("Initial values must be positive numbers")
 
-    handle_na = misc._validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
+    handle_na = validations.validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
 
     # Prepare datasets
     prepared_datasets = _prepare_multiband_datasets(datasets, bands, handle_na)
@@ -374,10 +374,10 @@ def _prepare_multiband_datasets(datasets: list[tuple],
                            f"(field, rho, kind, sigma); got {len(dataset)} elements")
 
         # Validate kind
-        kind = misc._validate_option(kind, ['xx', 'xy'], 'kind')
+        kind = validations.validate_option(kind, ['xx', 'xy'], 'kind')
 
         # Validate and clean data
-        field, rho = misc._validate_xy(field, rho, handle_na)
+        field, rho = validations.validate_xy(field, rho, handle_na)
 
         # Validate sigma if provided
         if sigma is not None:
@@ -583,10 +583,10 @@ def fit_twoband(field: np.ndarray,
                          f"got {len(p0)} values")
     if np.any(p0 <= 0):
         raise ValueError("Initial values must be positive numbers")
-    kind = misc._validate_option(kind, ['xx', 'xy'], 'kind')
+    kind = validations.validate_option(kind, ['xx', 'xy'], 'kind')
     bands = _validate_band_notes(bands, 2)
-    handle_na = misc._validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
-    field, rho = misc._validate_xy(field, rho, handle_na)
+    handle_na = validations.validate_option(handle_na, ['exclude', 'raise'], 'handle_na')
+    field, rho = validations.validate_xy(field, rho, handle_na)
     # Validate and prepare extension data
     field_ext, rho_ext = _prepare_twoband_fit_extension(extension)
 

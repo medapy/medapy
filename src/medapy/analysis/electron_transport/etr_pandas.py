@@ -5,7 +5,7 @@ import numpy.typing as npt
 import pandas as pd
 import pint
 
-import medapy.utils.misc as misc
+from medapy.analysis import processing
 from medapy.analysis.proc_pandas import DataProcessingAccessor
 from . import electron_transport as etr
 
@@ -238,7 +238,7 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
         col = self.col_y if col is None else self.ms.get_column(col)
 
         # Calculate fit coefficients
-        coefs = misc.quick_fit(self.x, self.ms[col], x_range=x_range)
+        coefs = processing.quick_fit(self.x, self.ms[col], x_range=x_range)
 
         # Work on a copy of the data
         df = self._get_df_copy()
@@ -249,7 +249,7 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
             # Prepare new column name
             new_col = self._col_name_append(col, append=add_col)
             # Calculate fit values
-            new_values =  misc.make_curve(df.ms.x, coefs)
+            new_values =  processing.make_curve(df.ms.x, coefs)
             # Assign values and metadata
             df.ms._set_column_state(new_col, new_values, unit, set_axis, add_label)
 
@@ -370,7 +370,7 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
         field, rho = self.x, self.ms[col]
         if field_range:
             fldrho = np.column_stack((self.x, self.ms[col]))
-            fldrho = misc.select_range_arr(fldrho, 0, field_range, inside_range=inside_range)
+            fldrho = processing.select_range_arr(fldrho, 0, field_range, inside_range=inside_range)
             field, rho = fldrho.T
 
         # Calculate fit coefficient

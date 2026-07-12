@@ -36,6 +36,8 @@ API documentation generated from docstrings.
 
 ::: medapy.analysis.proc_pandas
 
+::: medapy.analysis.processing
+
 ### Electron Transport
 
 ::: medapy.analysis.electron_transport.etr_pandas
@@ -43,10 +45,6 @@ API documentation generated from docstrings.
 ::: medapy.analysis.electron_transport.electron_transport
 
 ## Utilities
-
-### Miscellaneous Utilities
-
-::: medapy.utils.misc
 
 ### Validations
 
@@ -63,6 +61,10 @@ API documentation generated from docstrings.
 ### SI Prefixes
 
 ::: medapy.utils.prefixes
+
+### Optional Dependencies
+
+::: medapy.utils.optional
 
 ## Plot Configuration
 

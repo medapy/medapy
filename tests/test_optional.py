@@ -8,7 +8,7 @@ use by functions that depend on packages outside the core install.
 import numpy as np
 import pytest
 
-from medapy.utils import misc
+from medapy.analysis import processing
 from medapy.utils.optional import require
 
 
@@ -37,7 +37,7 @@ class TestRequire:
 
 class TestSavgolRequiresScipy:
     def test_works_when_scipy_available(self):
-        result = misc.savgol_filter(np.arange(9.0), 3, order=1)
+        result = processing.savgol_filter(np.arange(9.0), 3, order=1)
         assert result.shape == (9,)
         assert not np.isnan(result).all()
 
@@ -46,6 +46,6 @@ class TestSavgolRequiresScipy:
             raise ImportError(f"'{module}' is required but is not installed. "
                               f"Install it with: pip install medapy[{extra}]")
 
-        monkeypatch.setattr(misc, 'require', missing)
+        monkeypatch.setattr(processing, 'require', missing)
         with pytest.raises(ImportError, match=r"pip install medapy\[fit\]"):
-            misc.savgol_filter(np.arange(9.0), 3, order=1)
+            processing.savgol_filter(np.arange(9.0), 3, order=1)
