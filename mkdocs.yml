@@ -33,6 +33,4 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Tutorials: tutorials.md
-  - Examples: examples.md
   - Reference: reference.md
-  - Explanation: explanation.md
