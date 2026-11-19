@@ -768,15 +768,9 @@ class TestDuplicateColumnHandling:
         assert len(columns) == 3
         assert all('Current' in col for col in columns)
 
-        # Verify units are correct for each
-        units_dict = {col: df.ms.get_unit(col) for col in columns}
-        units = list(units_dict.values())
-
-        # Check that we have 3 different units
-        assert len(set(units)) == 3
-        assert 'mA' in units
-        assert 'A' in units
-        assert 'uA' in units or 'µA' in units  # pint might format as µA
+        # Compare as units: the micro symbol pint writes differs between versions
+        units = [df.ms.get_unit(col) for col in columns]
+        assert {ureg.Unit(u) for u in units} == {ureg.mA, ureg.A, ureg.uA}
 
 
 class TestUnitTranslationAndValidation:

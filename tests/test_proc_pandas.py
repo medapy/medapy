@@ -34,7 +34,10 @@ class TestDataProcessingAccessorBasics:
         """Test that .proc.ms property returns MeasurementSheetAccessor."""
         df = pd.DataFrame({'Field (T)': [0, 1, 2], 'Resistance (ohm)': [100, 110, 120]})
         df.ms.init_msheet()
-        assert df.proc.ms is df.ms
+        # pandas >= 3 creates a new accessor on every access, so compare the frames
+        ms = df.proc.ms
+        assert isinstance(ms, medapy.ms_pandas.MeasurementSheetAccessor)
+        assert ms._obj is df
 
     def test_axis_properties(self):
         """Test that .proc has x, y, z properties."""
