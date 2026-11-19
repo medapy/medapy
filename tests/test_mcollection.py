@@ -471,22 +471,20 @@ class TestMeasurementCollectionDisplay:
         ]
         return MeasurementCollection(files, basic_definitions)
 
-    def test_head(self, small_collection, capsys):
-        """Test head method displays first n files."""
-        small_collection.head(3)
-        captured = capsys.readouterr()
-        assert "file0_T=0K.csv" in captured.out
-        assert "file1_T=1K.csv" in captured.out
-        assert "file2_T=2K.csv" in captured.out
-        assert "file3_T=3K.csv" not in captured.out
+    def test_head(self, small_collection):
+        """Test head method returns first n files."""
+        head = small_collection.head(3)
+        assert "file0_T=0K.csv" in head
+        assert "file1_T=1K.csv" in head
+        assert "file2_T=2K.csv" in head
+        assert "file3_T=3K.csv" not in head
 
-    def test_tail(self, small_collection, capsys):
-        """Test tail method displays last n files."""
-        small_collection.tail(2)
-        captured = capsys.readouterr()
-        assert "file3_T=3K.csv" in captured.out
-        assert "file4_T=4K.csv" in captured.out
-        assert "file0_T=0K.csv" not in captured.out
+    def test_tail(self, small_collection):
+        """Test tail method returns last n files."""
+        tail = small_collection.tail(2)
+        assert "file3_T=3K.csv" in tail
+        assert "file4_T=4K.csv" in tail
+        assert "file0_T=0K.csv" not in tail
 
     def test_str_small_collection(self, small_collection):
         """Test string representation of small collection."""

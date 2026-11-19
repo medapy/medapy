@@ -420,12 +420,10 @@ class MeasurementCollection:
         return self.files.pop(index)
 
     def head(self, n: int = 5) -> None:
-        header = self.__get_repr_header()
-        print(header + self._head_files_str(n))
+        return self.__get_repr_header() + self._head_files_str(n)
 
     def tail(self, n: int = 5) -> None:
-        header = self.__get_repr_header()
-        print(header + self._tail_files_str(n))
+        return self.__get_repr_header() + self._tail_files_str(n)
 
     def to_list(self):
         return self.files.copy()
@@ -439,7 +437,7 @@ class MeasurementCollection:
             head += f'{i:>2}    {f.path.name}\n'
         return head.rstrip('\n')
 
-    def _tail_files_str(self, n: str) -> str:
+    def _tail_files_str(self, n: int) -> str:
         tail = ''
         ref_idx = len(self.files) - n
         for (i, f) in enumerate(self.files[-n:]):
