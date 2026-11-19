@@ -1,7 +1,7 @@
 # Explanation
 
 This page covers the ideas behind MeDaPy's API, the things that are hard to see from the
-[Tutorials](tutorials.md) or the [Reference](reference.md) alone: where a measurement sheet
+[Tutorials](tutorials.md) or the [Reference](reference/index.md) alone: where a measurement sheet
 keeps its state, how a filename turns into parameters, and how the pieces fit together.
 
 ## The measurement sheet model

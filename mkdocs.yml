@@ -7,6 +7,8 @@ strict: true
 
 theme:
   name: "material"
+  features:
+    - navigation.indexes
 
 plugins:
   - mkdocstrings:
@@ -14,9 +16,19 @@ plugins:
         python:
           paths: [src]
           options:
-            docstring_style: numpy
+            # Most docstrings are NumPy style, some Google style; detect per docstring
+            docstring_style: auto
+            docstring_options:
+              default: numpy
+              style_order: [numpy, google]
+            filters: ["!^_"]
+            members_order: source
+            heading_level: 2
             show_source: true
             show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
             show_signature_annotations: true
             separate_signature: true
             merge_init_into_class: true
@@ -39,4 +51,10 @@ nav:
   - Home: index.md
   - Tutorials: tutorials.md
   - Explanation: explanation.md
-  - Reference: reference.md
+  - Reference:
+      - reference/index.md
+      - Measurement sheet: reference/ms.md
+      - Processing: reference/processing.md
+      - Electron transport: reference/transport.md
+      - Collections: reference/collection.md
+      - Utilities: reference/utilities.md
