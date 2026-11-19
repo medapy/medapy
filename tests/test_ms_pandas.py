@@ -102,6 +102,33 @@ class TestMeasurementSheetAxes:
         df.ms.set_as_axis(None, 'x')
         assert df.ms.axes['x'] is None
 
+    def test_reset_axes_restores_defaults(self):
+        """Test that reset_axes drops custom axes and reassigns x, y, z."""
+        df = pd.DataFrame({'A': [1.], 'B': [2.], 'C': [3.], 'D': [4.]})
+        df.ms.init_msheet()
+        df.ms.set_as_axis('D', 'w')
+        df.ms.set_as_x('C', swap=True)
+
+        df.ms.reset_axes()
+        assert df.ms.axes == {'x': 'A', 'y': 'B', 'z': 'C'}
+
+    def test_reset_axes_fewer_columns_keeps_main_axes(self):
+        """Test that main axes without a column are kept as None."""
+        df = pd.DataFrame({'A': [1.]})
+        df.ms.init_msheet()
+
+        df.ms.reset_axes()
+        assert df.ms.axes == {'x': 'A', 'y': None, 'z': None}
+
+    def test_multi_column_getitem_drops_custom_axes(self):
+        """Test that a column subset gets default axes only."""
+        df = pd.DataFrame({'A': [1.], 'B': [2.], 'C': [3.], 'D': [4.]})
+        df.ms.init_msheet()
+        df.ms.set_as_axis('D', 'w')
+
+        subset = df.ms[['D', 'A']]
+        assert subset.ms.axes == {'x': 'D', 'y': 'A', 'z': None}
+
 
 class TestMeasurementSheetLabels:
     """Test label functionality."""

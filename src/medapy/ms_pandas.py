@@ -1193,6 +1193,12 @@ class MeasurementSheetAccessor:
 
     # Axes methods
     def reset_axes(self) -> None:
+        """Reset axes to the defaults: the first three columns as x, y and z.
+
+        Custom axes are removed. Main axes without a matching column are set
+        to None.
+        """
+        self._axes = {ax: None for ax in self.MAIN_AXES}
         columns = self._obj.columns
         if len(columns) > 0:
             self._axes['x'] = columns[0]
