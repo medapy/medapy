@@ -19,7 +19,7 @@ pip install "medapy[plot]"  # + matplotlib (publication style and colormaps)
 pip install "medapy[all]"   # fit + plot
 ```
 
-MeDaPy requires Python 3.10 or newer.
+MeDaPy requires Python 3.11 or newer.
 
 ## Quickstart
 
