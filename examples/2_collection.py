@@ -1,30 +1,13 @@
+# --8<-- [start:imports]
+from itertools import islice
 from pathlib import Path
 
 from medapy.collection import (MeasurementCollection, DefinitionsLoader,
                                ParameterDefinition, MeasurementFile, ContactPair)
+# --8<-- [end:imports]
 
 
-# helper function to print files from collection
-def print_files(fs, n, header=None, end=None):
-    if header:
-        print(header)
-        print('-'*len(header))
-
-    if isinstance(fs, MeasurementCollection):
-        fs_len = len(fs)
-        fs.head(n)
-    else:
-        for (i, f) in enumerate(fs):
-            if i < n:
-                print(f'{i:2}: {f.path.name}')
-
-        fs_len = i + 1
-    print(f'Total number of elements: {fs_len}')
-    if end:
-        print('-'*len(end))
-        print(end)
-    print()
-
+# --8<-- [start:definitions]
 # Create parameter definitions inside code
 # example:
 #   long_names: [name1, name2]
@@ -57,7 +40,9 @@ temp_param = ParameterDefinition(
     short_names=['T'],
     units=['K', 'mK']
 )
+# --8<-- [end:definitions]
 
+# --8<-- [start:file]
 # Create test measurement file representation
 testname = "sample_V1-5(1e-3V)_V3-7_V2-8_V4_V6_I11_sweepField_B-14to14T_T=3.0K_date.csv"
 testfile = MeasurementFile(testname, parameters=[field_param, temp_param])
@@ -88,10 +73,12 @@ print(merged.path)
 # To change separator between name parts, use 'sep' parameter
 f = merged.generate_filename(prefix='sample', postfix='merged')
 print(f)
+# --8<-- [end:file]
 
 # Print states of parameters parsed from testname
 print(*list(map(repr, testfile.parameters.values())), sep='\n', end='\n\n')
 
+# --8<-- [start:collection]
 # Load default parameter definitions
 parameters = DefinitionsLoader().get_all()
 print(*parameters, sep='\n', end='\n\n') # to check loaded parameter definitions
@@ -105,11 +92,12 @@ collection = MeasurementCollection(path, parameters)
 # print(collection) # uncomment this line
 
 # Similarly to pandas we can also use 'head' and 'tail' methods
-collection.head(6) # default 5
-collection.tail()
-print()
+print(collection.head(6)) # default 5
+print(collection.tail(), end='\n\n')
+# --8<-- [end:collection]
 
 
+# --8<-- [start:list_ops]
 # Collections in many ways behave like lists
 # we can add them together, append files, extend from iterables
 print(f"Collection length initially: {len(collection)}")
@@ -136,9 +124,10 @@ print(f"Copied collection length after 'extend': {len(collection2)}")
 # Add two collections
 # unlike extend this also adds parameter definitions
 collection2 = collection[:5] + collection[-5:]
-print(f"New collection length: {len(collection2)}")
-print()
+print(f"New collection length: {len(collection2)}", end='\n\n')
+# --8<-- [end:list_ops]
 
+# --8<-- [start:state]
 # To access results of parameters parsing use 'state_of' method
 # Call the method with 'name_id' of required parameter
 state = meas_f.state_of('magnetic_field')
@@ -152,25 +141,34 @@ print(f"Parameter is swept: {state.is_swept}") # value, min, max, is_swept, swee
 # sweep and range are additional attributes
 # they return tuples of related values or None if not available
 print(f"Sweep tuple: {state.sweep}") # (min, max, sweep_direction)
-print(f"Range tuple: {state.range}") # (min, max)
-print()
+print(f"Range tuple: {state.range}", end='\n\n') # (min, max)
+# --8<-- [end:state]
 
 
+# --8<-- [start:filter]
 # To filter data in collection use filter
-# Filter sweep direction
+# Filter sweep direction of a swept parameter
+# 'sweep_directions' only applies together with 'sweeps'
 # Increasing sweep options: 'inc', 'up', 'increasing'
 # Decreasing sweep options: 'dec', 'down', 'decreasing'
-files_down = collection.filter(sweep_direction='dec')
-print_files(files_down, n=5, header='Sweep -- down')
+files_down = collection.filter(sweeps='magnetic_field', sweep_directions='dec')
+print(f"Sweep down: {len(files_down)} files")
+print(files_down.head(), end='\n\n')
 
 # Filter temperature range from 2 to 7K
 # To avoid storing the whole list of files we can use generator instead
+# Files are checked lazily while iterating, so the generator has no length
+# Use 'islice' to take only the first few matches
 files_T2_7 = collection.filter_generator(temperature=(2, 7))
-print_files(files_T2_7, n=5, header='Temperature from 2-7K')
+print("Temperature from 2 to 7K, first 5 files:")
+for f in islice(files_T2_7, 5):
+    print(f.path.name)
+print()
 
 # Filter contact pair
-files_V2_6 = collection.filter_generator(contacts=(2, 6))
-print_files(files_V2_6, n=5, header='Contact pair 2-6')
+files_V2_6 = collection.filter(contacts=(2, 6))
+print(f"Contact pair 2-6: {len(files_V2_6)} files")
+print(files_V2_6.head(), end='\n\n')
 
 # Filter contact pair with particular polarization
 pair = ContactPair(1, 5, 'I', 1e-6) # create contact pair I1-5(1uA)
@@ -180,15 +178,19 @@ pair = ContactPair(1, 5, 'I', 1e-6) # create contact pair I1-5(1uA)
 # Integer or tuple[2] can be used to have a single contact/pair without polarization
 # pair = ContactPair.make_from(1)
 # pair = ContactPair.make_from((1, 5))
-files_1uA = collection.filter_generator(contacts=pair)
-print_files(files_1uA, n=5, header='Contact pair 1-5, I=1uA')
+files_1uA = collection.filter(contacts=pair)
+print(f"Contact pair 1-5, I=1uA: {len(files_1uA)} files")
+print(files_1uA.head(), end='\n\n')
 
 # Combine several filters
-files_specific = collection.filter_generator(
+files_specific = collection.filter(
     contacts=[pair, (3, 7)],
     polarization='current',
-    sweep_direction='inc',
+    sweeps='magnetic_field',
+    sweep_directions='inc',
     temperature=(2, 10),
     position=[45, 'IP'],
 )
-print_files(files_specific, n=5, header='Files filtered in a specific way')
+print(f"Files filtered in a specific way: {len(files_specific)} files")
+print(files_specific.head())
+# --8<-- [end:filter]

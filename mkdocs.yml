@@ -1,4 +1,5 @@
 site_name: MeDaPy Docs
+strict: true
 
 theme:
   name: "material"
@@ -23,7 +24,9 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.superfences
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
   - admonition
   - pymdownx.details
 

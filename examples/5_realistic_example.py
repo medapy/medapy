@@ -1,3 +1,4 @@
+# --8<-- [start:load]
 from pathlib import Path
 
 import pandas as pd
@@ -20,24 +21,28 @@ parameters = DefinitionsLoader().get_all()
 
 # Initialize folder as measurement collection
 collection = MeasurementCollection(data_dir, parameters)
+# --8<-- [end:load]
 
+# --8<-- [start:filter]
 # For fitting, we select suitable files by parameters; current magnitude in this example
 pair_10mA = ContactPair(1, 5, 'I', 10e-3) # create contact pair I1-5(10mA)
 
 # Filter to select a specific xx and xy files by criteria
 files_xx = collection.filter(contacts=[pair_10mA, (20, 21)])
 print('Files Rxx', files_xx, sep='\n', end='\n\n')
-# Unpack the datafile from collection to work with it direclty
+# Unpack the datafile from collection to work with it directly
 xx_datafile = files_xx.files[0]
 
 files_xy = collection.filter(contacts=[pair_10mA, (20, 40)])
 print('Files Rxy', files_xy, sep='\n', end='\n\n')
 xy_datafile = files_xy.files[0]
+# --8<-- [end:filter]
 
 # Alternatively we can set the names manually
 # xx_datafile = data_dir / 'a_twoband_test_I1-5(10mA)_V20-21_Rxx.csv'
 # xy_datafile = data_dir / 'a_twoband_test_I1-5(10mA)_V20-40_Rxy.csv'
 
+# --8<-- [start:read]
 # Read the data with pandas
 xx = pd.read_csv(xx_datafile.path, delimiter=',', usecols=[0, 1])
 xy = pd.read_csv(xy_datafile.path, delimiter=',')
@@ -54,7 +59,9 @@ data = xx.ms.concat(xy)
 data.ms.add_labels({'Field': 'H',
                     'Resistance_xx': 'Rxx',
                     'Resistance_xy': 'Rxy'})
+# --8<-- [end:read]
 
+# --8<-- [start:resistivity]
 # Validate that x axis (Field column) is monotonously increasing
 data.etr.ensure_increasing(inplace=True)
 
@@ -69,9 +76,7 @@ t = 400e-9
 # t = 400e-9 * ureg.meter
 
 # Convert resistance to resistivity
-# This will add the resistivity column with name specified in add_col (default - 'rho')
-# The name will be modified by attaching '_xx' or '_xy'
-# To not add the column pass empty string
+# This adds the resistivity column named by new_col (default - 'rho')
 # inplace parameter is mimicking pandas and determines whether to modify current dataframe
 data.etr.r2rho('xx', col='Rxx', t=t, width=width, length=length,
                new_col='Resistivity_xx', add_label='rho_xx',
@@ -79,7 +84,9 @@ data.etr.r2rho('xx', col='Rxx', t=t, width=width, length=length,
 data.etr.r2rho('xy', col='Rxy', t=t,
                new_col='Resistivity_xy', set_axis='y', add_label='rho_xy',
                inplace=True)
+# --8<-- [end:resistivity]
 
+# --8<-- [start:fit]
 # Make a standard Hall fitting on a range > 11
 # If add_col is not empty, fit values will be added to a new column
 # add_col is an appendix to the column name used (default - 'linHall')
@@ -104,18 +111,22 @@ p_opt_xx, _ = data.etr.fit_twoband(p0, col='rho_xx', kind='xx', bands=bands,
                                    field_range=(-6, 6), inside_range=False,
                                    extension=(data.ms.x, data.ms.y),
                                    add_label='f2_xx', report=True, inplace=True)
+# --8<-- [end:fit]
 
 # It would be easier to calculate xx values from p_opt
 # but current approach is used to illustrate different set of fit_twoband parameters
 # data.etr.calculate_twoband(p_opt_xy, cols='rho_xx', kinds='xx', bands=bands,
 #                            add_labels='f2_xx', inplace=True)
 
+# --8<-- [start:save]
 # Apply scientific format to specified columns
 # the rest will use float_format (default - '%.4f')
 cols = ['rho_xx', 'rho_xy', 'flin', 'f2_xy', 'f2_xx']
 fmtr = {col: '{:.4E}' for col in cols}
 data.ms.save_msheet(result_dir / 'data.csv', formatter=fmtr)
+# --8<-- [end:save]
 
+# --8<-- [start:plot]
 # Plot results
 fig, [ax1, ax2] = plt.subplots(ncols=2, figsize=(10, 5))
 fig.suptitle('Fit results')
@@ -138,3 +149,4 @@ ax1.legend()
 ax2.legend()
 plt.tight_layout()
 plt.show()
+# --8<-- [end:plot]

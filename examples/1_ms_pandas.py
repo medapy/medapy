@@ -1,3 +1,4 @@
+# --8<-- [start:init]
 import pandas as pd
 import pint_pandas
 from medapy import ms_pandas
@@ -13,10 +14,12 @@ df = pd.DataFrame({'Field (Oe)': [1, 2, 3],
                     })
 custom_unit_dict = dict(Ohm='ohm') # to map units written not as in pint
 df.ms.init_msheet(translations=custom_unit_dict, patch_rename=True) # initialize measurement sheet
+# --8<-- [end:init]
 print('\nInitialized MSheet:')
 print(df.ms) # print msheet to see units, axes, and labels
 
 
+# --8<-- [start:labels_axes]
 # Add some labels
 # allowed to have several labels for the same column
 df.ms.add_labels({'Field': ['H', 'B'],
@@ -34,20 +37,24 @@ df.ms.add_label('Field', 'Champ')
 df.ms.set_as_axis('R', 'u') # add new axis
 df.ms.set_as_axis('rho', 'y') # reassign y axis to rho
 df.ms.set_as_axis('Voltage', 'x', swap=True) # assign axis and swap if both exist
+# --8<-- [end:labels_axes]
 print('\nMSheet with labels and new axes:')
 print(df.ms)
 
 
+# --8<-- [start:access]
 # Various methods to access data
 fld = df['Field'] # standard df access
 fld = df.ms['Field'] # MS access by column
 fld = df.ms["H"] # MS access by label
 rho = df.ms.y # MS access by axis
 fld_r = df.ms[["H", "Resistance"]] # get MS with only specified columns
+# --8<-- [end:access]
 print('\nSlice of MSheet:')
 print(fld_r.ms)
 
 
+# --8<-- [start:units]
 # Unit conversion
 # Option 1: manually calculate values and change unit
 df.ms['V'] = df.ms['V'] * 1000
@@ -57,16 +64,19 @@ df.ms.convert_unit('H', 'T', contexts='Gaussian')
 # contexts is an optional parameter for pint package
 # here it is required to be able to convert Oe to T
 # conversion rate will be 1 T = 9999.9999972579 Oe
+# --8<-- [end:units]
 print('\nMSheet after unit conversions:')
 print(df.ms)
 
 
+# --8<-- [start:wu]
 # Calculations preserving units (pint_pandas is required)
 # It is possible to get a column as an array with units
 # and use it for computations of additional quantities
 crnt = df.ms.wu('I') # 'wu' means 'with units'
 volt = df.ms.wu('V')
 df.ms['Conductance'] = crnt / volt
+# --8<-- [end:wu]
 print('\nMSheet with conductance column:')
 print(df.ms)
 df.ms.convert_unit('Conductance', 'siemens') # to force conversion from uA/uV to siemens

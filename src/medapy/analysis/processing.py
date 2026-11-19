@@ -1162,11 +1162,13 @@ def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike,
         Independent variable values.
     y : array_like
         Dependent variable values.
-    range_val : array_like, optional
+    x_range : array_like, optional
         Range of x values to consider (min, max). If None, uses full range.
     ddof : int, default = 0
         Delta degrees of freedom to use to correct for data preprocessing.
         Std is calculated using np.std(residuals, ddof=2+ddof)
+    handle_na : {'raise', 'exclude'}, default 'raise'
+        How to handle NaN values in `x` and `y`.
 
     Returns
     -------
@@ -1177,7 +1179,7 @@ def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike,
     ------
     ValueError
         If x and y have different lengths
-        If range_val is invalid
+        If x_range is invalid
         If handle_na is invalid
     TypeError
         If inputs are not numeric arrays.

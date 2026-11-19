@@ -1,3 +1,4 @@
+# --8<-- [start:setup]
 import pandas as pd
 from medapy import ms_pandas
 from medapy.analysis import etr
@@ -17,25 +18,28 @@ custom_unit_dict = dict(Ohm='ohm')
 df.ms.init_msheet(translations=custom_unit_dict, patch_rename=True)
 
 # Add labels
-# Add labels
 df.ms.add_labels({'Field': 'H', 'Resistance': 'R',
                   'Voltage': 'V', 'Current': 'I'})
 
 # Set y axis
 df.ms.set_as_y('R')
+# --8<-- [end:setup]
 
 # Display current DataFrame
 print('\nOriginal MSheet:')
 print(df.ms)
 
 
+# --8<-- [start:proc_methods]
 # Functionality
 # etr_pandas is a subclass of proc_pandas
 # that means all proc methods can be called from etr too
 df.etr.ensure_increasing(inplace=True)
+# --8<-- [end:proc_methods]
 print('\nMSheet forced to monotonic increasing:')
 print(df.ms)
 
+# --8<-- [start:r2rho]
 # In addition, etr allows:
 # Convert resistance to resistivity
 t = 50 * ureg('nm') # set geometric parameters
@@ -43,11 +47,13 @@ w = 10 * ureg('cm')
 l = 2 * ureg('cm')
 
 df.etr.r2rho('xx', col='R', t=t, width=w, length=l, new_col='Resistivity', add_label='rho', inplace=True)
+# --8<-- [end:r2rho]
 print('\nMSheet with calculated resistivity:')
 print(df.ms)
 
 
-df.ms.convert_unit('rho', 'ohm*cm') # vonvert from m to cm for more convenient display
+# --8<-- [start:linhall]
+df.ms.convert_unit('rho', 'ohm*cm') # convert from m to cm for more convenient display
 df.ms.set_as_y('rho')
 
 # Make a linear Hall fit
@@ -55,18 +61,22 @@ df.ms.set_as_y('rho')
 lin_coefs, _ = df.etr.fit_linhall(col='rho', x_range=(1, None),
                                   set_axis='l', add_label='flin',
                                   inplace=True)
+# --8<-- [end:linhall]
 print(f'\nMSheet with linear Hall fit (coefs={lin_coefs}):')
 print(df.ms)
 
+# --8<-- [start:twoband]
 # Make a two-band Hall fit
 bands = 'he' # hole and electron bands
 p0 = [1e26, 1e25, 0.015, 0.02] # starting values [n1, n2, mu1, mu2] in SI units
 p_opt, _ = df.etr.fit_twoband(p0, kind='xx', bands=bands, report=True,
                               set_axis='f', add_label='f2bnd', inplace=True)
+# --8<-- [end:twoband]
 
 print(f'\nMSheet with two-band Hall fit (coefs={[f"{x:.2E}" for x in p_opt]}):')
 print(df.ms)
 
+# --8<-- [start:plot]
 fig, ax = plt.subplots(layout='constrained')
 ax.set_title('ETR accessor example')
 ax.set_xlabel(f'Field ({df.ms.get_unit("H")})')
@@ -76,3 +86,4 @@ ax.plot(df.ms.x, df.ms['flin'], label='linear fit')
 ax.plot(df.ms.x, df.ms['f2bnd'], label='two-band fit')
 ax.legend()
 plt.show()
+# --8<-- [end:plot]

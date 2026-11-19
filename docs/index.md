@@ -6,5 +6,3 @@ Documentation is in an alpha version
 2. [Examples](examples.md)
 3. [Reference](reference.md)
 4. [Explanation](explanation.md)
-
-Only [Reference](reference.md) contains some information
