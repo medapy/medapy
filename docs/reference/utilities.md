@@ -1,5 +1,6 @@
 # Utilities
 
+[](){#medapy.utils.prefixes}
 ## SI prefixes
 
 `from medapy.utils import prefixes`. Used to parse and write values such as `10uA` or `1.5mK`
@@ -11,6 +12,7 @@ in filenames.
       show_root_heading: false
       show_root_toc_entry: false
 
+[](){#medapy.utils.warnings}
 ## Warnings
 
 `from medapy.utils.warnings import ...`, e.g. to filter them with `warnings.filterwarnings`.

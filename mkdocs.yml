@@ -4,6 +4,9 @@ repo_url: https://github.com/medapy/medapy
 repo_name: medapy/medapy
 edit_uri: edit/master/docs/
 strict: true
+# Build-time helpers, not pages
+exclude_docs: |
+  /ext/
 
 theme:
   name: "material"
@@ -11,11 +14,15 @@ theme:
     - navigation.indexes
 
 plugins:
+  # Explicit, so Markdown anchors ([](){#id}) are registered as cross-ref targets
+  - autorefs
   - mkdocstrings:
       handlers:
         python:
           paths: [src]
           options:
+            extensions:
+              - docs/ext/see_also.py:SeeAlsoLinks
             # Most docstrings are NumPy style, some Google style; detect per docstring
             docstring_style: auto
             docstring_options:
@@ -45,6 +52,7 @@ markdown_extensions:
       base_path: ["."]
       check_paths: true
   - admonition
+  - attr_list
   - pymdownx.details
 
 nav:

@@ -11,6 +11,7 @@ names. The same methods are available on [`df.etr`](transport.md).
     options:
       heading_level: 3
 
+[](){#medapy.analysis.processing}
 ## Array functions
 
 The engine behind `.proc`, usable on plain arrays and DataFrames:
