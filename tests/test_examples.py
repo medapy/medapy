@@ -40,3 +40,15 @@ def test_example_runs(script, tmp_path, monkeypatch):
     finally:
         if plt is not None:
             plt.close('all')
+
+
+def test_readme_quickstart_matches_example():
+    # README is rendered on GitHub/PyPI, which can't resolve snippet includes,
+    # so its quickstart is a copy of the marked region in 0_quickstart.py
+    script = (EXAMPLES_DIR / '0_quickstart.py').read_text()
+    start = script.index('# --8<-- [start:quickstart]\n') + len('# --8<-- [start:quickstart]\n')
+    end = script.index('# --8<-- [end:quickstart]')
+    snippet = script[start:end]
+
+    readme = (EXAMPLES_DIR.parent / 'README.md').read_text()
+    assert f'```python\n{snippet}```' in readme

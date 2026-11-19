@@ -1,4 +1,8 @@
 site_name: MeDaPy Docs
+site_url: https://medapy.github.io/medapy/
+repo_url: https://github.com/medapy/medapy
+repo_name: medapy/medapy
+edit_uri: edit/master/docs/
 strict: true
 
 theme:
@@ -8,6 +12,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
+          paths: [src]
           options:
             docstring_style: numpy
             show_source: true

@@ -45,16 +45,10 @@ where = ["src"]
 
 [project.urls]
 Homepage = "https://github.com/medapy/medapy"
+Documentation = "https://medapy.github.io/medapy/"
+Repository = "https://github.com/medapy/medapy"
+Issues = "https://github.com/medapy/medapy/issues"
 
 # authors = [
 #   { name="example", email="example" },
 # ]
-
-# [project.urls]
-# Documentation = "https://readthedocs.org"
-# Repository = "https://github.com/me/spam.git"
-# Issues = "https://github.com/me/spam/issues"
-# Changelog = "https://github.com/me/spam/blob/master/CHANGELOG.md"
-
-
-
