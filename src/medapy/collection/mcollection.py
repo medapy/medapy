@@ -294,9 +294,12 @@ class MeasurementCollection:
         Args:
             contacts: Single contact pair (1, 2), list of pairs/contacts [(1, 2), 3], or single contact
             polarization: 'I' for current or 'V' for voltage
-            sweep_direction: 'inc' or 'dec'
+            sweeps: Parameter name(s) that should be swept
+            sweep_directions: Expected sweep direction(s): 'inc' or 'dec'
+            exact_sweeps: If True, sweep ranges must match exactly
+            name_contains: String(s) or regex pattern(s) that must appear in filename
             exclude: If True, exclude files that match criteria instead of including them
-            **parameter_filters: Parameter name with value or (min, max) tuple
+            **parameter_filters (float | tuple): Parameter name with value or (min, max) tuple
 
         Returns:
             New MeasurementCollection containing only matching files
@@ -394,11 +397,29 @@ class MeasurementCollection:
         )
 
     def sort(self, *parameters) -> 'MeasurementCollection':
+        """
+        Return a new collection sorted by the values of fixed parameters.
+
+        Parameters
+        ----------
+        *parameters : str
+            Parameter names to sort by, in order of priority.
+
+        Returns
+        -------
+        MeasurementCollection
+            New collection with the files sorted in ascending order.
+
+        Examples
+        --------
+        >>> by_temp_then_field = collection.sort('temperature', 'magnetic_field')
+        """
         files = sorted(self.files, key=lambda f: tuple(f.state_of(p).value for p in parameters))
         return type(self)(collection=files.copy(),
                           parameters=list(self.param_definitions.values()))
 
     def copy(self):
+        """Return a shallow copy; the `MeasurementFile` objects are shared."""
         return self.__copy__()
 
     def append(self, item) -> None:
@@ -419,13 +440,16 @@ class MeasurementCollection:
         """
         return self.files.pop(index)
 
-    def head(self, n: int = 5) -> None:
+    def head(self, n: int = 5) -> str:
+        """Return a numbered listing of the first `n` filenames."""
         return self.__get_repr_header() + self._head_files_str(n)
 
-    def tail(self, n: int = 5) -> None:
+    def tail(self, n: int = 5) -> str:
+        """Return a numbered listing of the last `n` filenames."""
         return self.__get_repr_header() + self._tail_files_str(n)
 
-    def to_list(self):
+    def to_list(self) -> list[MeasurementFile]:
+        """Return the files as a new list."""
         return self.files.copy()
 
     def __get_repr_header(self):

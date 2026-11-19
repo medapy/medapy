@@ -475,6 +475,27 @@ def _resistivity_from_tensor(kind: str, sigma_xx, sigma_xy, denominator):
         return sigma_xy / denominator
 
 def hall_fit_to_str(p, x_unit='T', y_unit='ohm*m', n=None, n_unit='m^-3'):
+    """
+    Format linear Hall fit results as string.
+
+    Parameters
+    ----------
+    p : sequence of 2 floats
+        Intercept and slope of the linear fit, (a0, k).
+    x_unit : str, default 'T'
+        Unit of the x data (field).
+    y_unit : str, default 'ohm*m'
+        Unit of the y data (Hall resistivity).
+    n : float, optional
+        Carrier density to report; omitted if not given.
+    n_unit : str, default 'm^-3'
+        Unit of `n`.
+
+    Returns
+    -------
+    str
+        One line per value, e.g. ``'a0 = 1.00e-08 ohm*m'``.
+    """
     str_res = (f'a0 = {p[0]:.2e} {y_unit}\n'
                f'k = {p[1]:.2e} {y_unit}/{x_unit}')
     if n:
@@ -525,6 +546,26 @@ def multiband_fit_to_str(p, bands):
 
 ## twoband - legacy
 def gen_hall2bnd_eq(bands):
+    """
+    Build the two-band Hall resistivity function rho_xy(H).
+
+    Parameters
+    ----------
+    bands : str
+        Two-letter band configuration: 'he', 'eh', 'hh' or 'ee'
+        ('h' for holes, 'e' for electrons).
+
+    Returns
+    -------
+    callable
+        ``f(H, n1, n2, mu1, mu2)`` returning rho_xy in ohm*m for field `H` in T,
+        densities in m^-3 and mobilities in m^2/(V·s).
+
+    See Also
+    --------
+    gen_mr2bnd_eq : Longitudinal counterpart
+    generate_twoband_eq : Select either by kind
+    """
     sign1, sign2 = list(map(_band_note_to_sign, bands))
     def xy(H, n1, n2, mu1, mu2):
         numerator = sign1*n1*mu1**2 + sign2*n2*mu2**2 + (sign1*n1 + sign2*n2)*(mu1*mu2*H)**2
@@ -533,6 +574,26 @@ def gen_hall2bnd_eq(bands):
     return xy
 
 def gen_mr2bnd_eq(bands):
+    """
+    Build the two-band longitudinal resistivity function rho_xx(H).
+
+    Parameters
+    ----------
+    bands : str
+        Two-letter band configuration: 'he', 'eh', 'hh' or 'ee'
+        ('h' for holes, 'e' for electrons).
+
+    Returns
+    -------
+    callable
+        ``f(H, n1, n2, mu1, mu2)`` returning rho_xx in ohm*m for field `H` in T,
+        densities in m^-3 and mobilities in m^2/(V·s).
+
+    See Also
+    --------
+    gen_hall2bnd_eq : Hall counterpart
+    generate_twoband_eq : Select either by kind
+    """
     sign1, sign2 = list(map(_band_note_to_sign, bands))
     def xx(H, n1, n2, mu1, mu2):
         numerator = n1*mu1 + n2*mu2 + (n1*mu2 + n2*mu1)*(mu1*mu2*H**2)
@@ -541,6 +602,26 @@ def gen_mr2bnd_eq(bands):
     return xx
 
 def generate_twoband_eq(kind, bands):
+    """
+    Build the two-band resistivity function for the given component.
+
+    Parameters
+    ----------
+    kind : {'xx', 'xy'}
+        Resistivity component: longitudinal ('xx') or Hall ('xy').
+    bands : str
+        Two-letter band configuration: 'he', 'eh', 'hh' or 'ee'
+        ('h' for holes, 'e' for electrons).
+
+    Returns
+    -------
+    callable
+        ``f(H, n1, n2, mu1, mu2)``; see `gen_mr2bnd_eq` and `gen_hall2bnd_eq`.
+
+    See Also
+    --------
+    generate_multiband_eq : Same for any number of bands
+    """
     assert (kind in ('xx', 'xy'))
     assert (bands in ('hh', 'he', 'ee', 'eh'))
     match kind:
@@ -769,6 +850,26 @@ def _prepare_twoband_fit_sigma(sigma: Optional[Union[float, npt.ArrayLike]],
         return None
 
 def twoband_fit_to_str(p, bands):
+    """
+    Format two-band fit results as string.
+
+    Parameters
+    ----------
+    p : sequence of 4 floats
+        Fitted parameters (n1, n2, mu1, mu2) in SI units.
+    bands : str
+        Two-letter band configuration: 'he', 'eh', 'hh' or 'ee'
+        ('h' for holes, 'e' for electrons).
+
+    Returns
+    -------
+    str
+        One line per parameter, e.g. ``'n1(h) = 1.00e+26 m^-3'``.
+
+    See Also
+    --------
+    multiband_fit_to_str : Same for interleaved multiband parameters
+    """
     b1, b2 = bands
     str_res = (f'n1({b1}) = {p[0]:.2e} m^-3\n'
                f'n2({b2}) = {p[1]:.2e} m^-3\n'

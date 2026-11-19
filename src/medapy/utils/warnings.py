@@ -1,4 +1,8 @@
 class UnitOverwriteWarning(UserWarning):
+    """Warning issued when the unit in a column name conflicts with the unit
+    already stored for that column, and one of them is discarded according to
+    the `priority` argument of `infer_unit` / `infer_ms_units`.
+    """
     pass
 
 

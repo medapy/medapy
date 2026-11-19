@@ -96,6 +96,29 @@ class DataProcessingAccessor():
         return self.ms.axes['z']
 
     def check_monotonic(self, interrupt=False):
+        """
+        Check whether the x-axis column is monotonic.
+
+        Parameters
+        ----------
+        interrupt : bool, default False
+            If True, raise instead of returning 0 for non-monotonic data.
+
+        Returns
+        -------
+        int
+            1 if monotonically increasing, -1 if monotonically decreasing,
+            0 if not monotonic.
+
+        Raises
+        ------
+        ValueError
+            If `interrupt` is True and the x-axis column is not monotonic.
+
+        See Also
+        --------
+        ensure_increasing : Reverse decreasing data so x increases
+        """
         # check = processing.check_monotonic_df(self._obj, self.col_x, interrupt=False)
         check = processing.check_monotonic_arr(self.x.values, interrupt=False)
         if interrupt and check == 0:
@@ -215,6 +238,35 @@ class DataProcessingAccessor():
                      handle_na: str = 'raise',
                      inplace: bool = False
                      ) -> pd.DataFrame | None:
+        """
+        Select data within or outside a specified x-axis range, for unsorted x.
+
+        Same interface as `select_range`, but compares every x value against the
+        boundaries instead of using binary search, so the x-axis column does not
+        need to be monotonic.
+
+        Parameters
+        ----------
+        val_range : array-like of length 2
+            Range boundaries (min, max) for selection. Order doesn't matter.
+        inside_range : bool, default True
+            If True, keep data inside the range. If False, keep data outside.
+        inclusive : {'both', 'left', 'right', 'neither'}, default 'both'
+            Whether to include boundary values.
+        handle_na : {'raise', 'exclude'}, default 'raise'
+            How to handle NaN/Inf values in the x-axis column.
+        inplace : bool, default False
+            If True, modify the DataFrame in place.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Filtered DataFrame with a reset index if inplace=False, None otherwise.
+
+        See Also
+        --------
+        select_range : Faster selection for monotonic x
+        """
         # Work on a copy of the data
         df = self._get_df_copy()
         # Get DataFrame with filtered range

@@ -802,9 +802,15 @@ class MeasurementSheetAccessor:
         """
         Get unit from a column.
 
-        Returns:
-        - str if column has unit
-        - None if no unit found
+        Parameters
+        ----------
+        column : str
+            Column name or label.
+
+        Returns
+        -------
+        str or None
+            Unit string, or None if the column has no unit.
         """
         column = self.get_column(column)
 

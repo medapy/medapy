@@ -11,6 +11,30 @@ from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER, format_with_prefix, dete
 
 
 class SweepDirection(Enum):
+    """
+    Direction of a parameter sweep.
+
+    Lookup accepts the value or a case-insensitive alias: ``'inc'``/``'up'``/
+    ``'increasing'``, ``'dec'``/``'down'``/``'decreasing'`` and
+    ``'und'``/``'na'``/``'undefined'``. Members also compare equal to these
+    strings.
+
+    Attributes
+    ----------
+    INCREASING : int
+        Sweep from lower to higher values, ``1``.
+    DECREASING : int
+        Sweep from higher to lower values, ``-1``.
+    UNDEFINED : int
+        Direction unknown, ``0``.
+
+    Examples
+    --------
+    >>> SweepDirection('up')
+    <SweepDirection.INCREASING: 1>
+    >>> SweepDirection.DECREASING == 'dec'
+    True
+    """
     INCREASING = 1
     DECREASING = -1
     UNDEFINED = 0
@@ -41,7 +65,46 @@ class SweepDirection(Enum):
 
 @dataclass
 class ParameterDefinition:
-    """Immutable parameter definition that can be shared"""
+    """
+    Schema of one parameter: its names, units and the patterns that parse it.
+
+    Collection classes take a list of definitions and parse every filename
+    against each of them. Usually built by `DefinitionsLoader` from JSON rather
+    than directly.
+
+    Parameters
+    ----------
+    name_id : str
+        Identifier used to look the parameter up, e.g. ``'temperature'``.
+    long_names : str or iterable of str
+        Full names, e.g. ``'Field'``. Generated filenames use a long name for
+        swept parameters (``sweepField``).
+    short_names : str or iterable of str, optional
+        Abbreviations, e.g. ``'T'``. Generated filenames use a short name for
+        fixed parameters (``T=10K``). Parsing accepts long and short names alike.
+        Must not overlap `long_names`; at least one of the two must be non-empty.
+    units : str or iterable of str, optional
+        Accepted units. SI-prefixed forms (``mK``, ``uT``) are accepted too.
+    special_values : mapping of str to number, optional
+        Named values, e.g. ``{'IP': 90, 'OOP': 0}``.
+    patterns : mapping of str to str, optional
+        Regex templates overriding or adding to the defaults ``'fixed'``,
+        ``'range'`` and ``'sweep'``. Templates may use the placeholders
+        ``{NAME}``, ``{LNAME}``, ``{SNAME}``, ``{VALUE}`` and ``{UNIT}``.
+    si_formatting : bool, default True
+        Whether to write values with SI prefixes when generating filenames.
+    precision : int or 'auto', default 'auto'
+        Decimal places when writing values; 'auto' drops trailing zeros.
+
+    Raises
+    ------
+    ValueError
+        If both name sets are empty, they overlap, or a pattern is invalid.
+
+    See Also
+    --------
+    DefinitionsLoader : Load definitions from JSON
+    """
     name_id: str
     long_names: str | Iterable[str]
     short_names: str | Iterable[str] = frozenset()
@@ -133,14 +196,23 @@ class ParameterDefinition:
         self.patterns = MappingProxyType(compiled_patterns)
 
     def get_pattern(self, pattern_type: str) -> Pattern:
+        """Return the compiled pattern of a type ('fixed', 'range', 'sweep', ...).
+
+        Raises
+        ------
+        ValueError
+            If no pattern of that type is defined.
+        """
         if pattern_type not in self.patterns:
             raise ValueError(f"Unknown pattern type: {pattern_type}")
         return self.patterns[pattern_type]
 
     def match(self, pattern_type: str, text: str) -> re.Match | None:
+        """Match the pattern of `pattern_type` at the start of `text`."""
         return self.get_pattern(pattern_type).match(text)
 
     def search(self, pattern_type: str, text: str) -> re.Match | None:
+        """Search for the pattern of `pattern_type` anywhere in `text`."""
         return self.get_pattern(pattern_type).search(text)
 
 
@@ -166,12 +238,38 @@ class _ParameterState:
 
 
 class Parameter:
+    """
+    A parameter of one file: a shared `ParameterDefinition` plus its own state.
+
+    The state is either fixed (a single value) or swept (optionally with a range
+    and a direction). Values are stored as `Decimal`; read them through
+    `MeasurementFile.state_of`, which returns a `ParameterState`.
+
+    Parameters
+    ----------
+    definition : ParameterDefinition
+        Schema of the parameter.
+    **kwargs
+        Initial state: ``value``, ``is_swept``, ``min_val``, ``max_val``,
+        ``sweep_direction``, ``unit``. A given ``value`` makes the parameter
+        fixed; given ``min_val`` and ``max_val`` make it swept.
+
+    Examples
+    --------
+    >>> temp_def = DefinitionsLoader().get_definition('temperature')
+    >>> p = Parameter(temp_def)
+    >>> p.parse_fixed('T=1.5K')
+    True
+    >>> str(p)
+    'T=1.5K'
+    """
     def __init__(self, definition: ParameterDefinition, **kwargs):
         self.definition = definition
         self.state = _ParameterState(**kwargs)
         self.check_state()
 
     def check_state(self):
+        """Normalize the state: apply `set_fixed`/`set_swept` from the stored values."""
         if self.state.value is not None:
             self.set_fixed(self.state.value)
 
@@ -217,7 +315,13 @@ class Parameter:
         return 1.0, unit_str
 
     def parse_fixed(self, text: str) -> bool:
-        """Parse fixed parameter value from regex match"""
+        """Set a fixed value parsed from `text` (e.g. ``'T=10K'``).
+
+        Returns
+        -------
+        bool
+            True if `text` matched the definition's 'fixed' pattern.
+        """
         m = self.definition.match('fixed', text)
         if not m:
             return False
@@ -236,6 +340,13 @@ class Parameter:
         return True
 
     def parse_range(self, text: str) -> bool:
+        """Set a swept range parsed from `text` (e.g. ``'B-14to14T'``).
+
+        Returns
+        -------
+        bool
+            True if `text` contains the definition's 'range' pattern.
+        """
         m = self.definition.search('range', text)
         if not m:
             return False
@@ -254,6 +365,16 @@ class Parameter:
         return True
 
     def parse_sweep(self, text: str) -> bool:
+        """Mark the parameter as swept if `text` is a range or sweep token.
+
+        A range (``'B-14to14T'``) also sets the bounds and direction; a bare
+        sweep token (``'sweepField'``) only sets the swept flag.
+
+        Returns
+        -------
+        bool
+            True if `text` matched either pattern.
+        """
         is_range = self.parse_range(text)
         if is_range:
             return True
@@ -265,6 +386,11 @@ class Parameter:
         return True
 
     def set_fixed(self, value: float | str):
+        """Make the parameter fixed at `value`, clearing any sweep state.
+
+        `value` may be a number or a special value name (e.g. ``'IP'``).
+        Returns the parameter itself.
+        """
         self.state.is_swept = False
         self.state.value = self.decimal_of(value)
         # Reset sweep-related attributes
@@ -274,6 +400,12 @@ class Parameter:
         return self
 
     def set_swept(self, start_val: Decimal, end_val: Decimal):
+        """Make the parameter swept from `start_val` to `end_val`.
+
+        The bounds are stored ordered as min/max and the direction is derived
+        from their order. If either is None, the sweep has no range and an
+        undefined direction. Returns the parameter itself.
+        """
         self.state.is_swept = True
         # Reset fixed-related attributes
         self.state.value = None
@@ -295,6 +427,7 @@ class Parameter:
         return self
 
     def update(self, other):
+        """Overwrite state fields with the truthy fields of another parameter."""
         self.state.value = other.state.value or self.state.value
         self.state.is_swept = other.state.is_swept or self.state.is_swept
         self.state.min_val = other.state.min_val or self.state.min_val
@@ -313,6 +446,7 @@ class Parameter:
         return Decimal(value_str)
 
     def copy(self):
+        """Return a copy with its own state and the same definition."""
         return self.__copy__()
 
     def __copy__(self):
@@ -396,6 +530,23 @@ class Parameter:
                 f'sweep_direction: {self.state.sweep_direction}]')
 
 class DefinitionsLoader:
+    """
+    Registry of parameter definitions loaded from JSON files.
+
+    The built-in definitions (``magnetic_field``, ``temperature``, ``position``)
+    are always loaded first; a custom file adds to them and replaces entries
+    with the same name.
+
+    Parameters
+    ----------
+    custom_config_path : str or Path, optional
+        JSON file with additional definitions.
+
+    Examples
+    --------
+    >>> loader = DefinitionsLoader('my_params.json')
+    >>> collection = MeasurementCollection(folder, parameters=loader.get_all())
+    """
     def __init__(self, custom_config_path: Path | str = None):
         self._definitions = {}
         self._load_defaults()
@@ -431,16 +582,35 @@ class DefinitionsLoader:
             raise KeyError(f"Parameter definition '{name}' not found")
         return self._definitions[name]
 
-    def get_definition(self, name: str) -> Parameter:
-        """Create Parameter instance from definition"""
+    def get_definition(self, name: str) -> ParameterDefinition:
+        """Create a `ParameterDefinition` from the definition named `name`."""
         definition = self.get_definition_dict(name)
         return ParameterDefinition(**definition)
 
-    def get_all(self) -> list[Parameter]:
+    def get_all(self) -> list[ParameterDefinition]:
+        """Create a `ParameterDefinition` for every loaded definition."""
         return [self.get_definition(name) for name in self._definitions.keys()]
 
 
 class ParameterState(NamedTuple):
+    """
+    Read-only snapshot of a parameter's state, with numbers as floats.
+
+    Returned by `MeasurementFile.state_of`.
+
+    Attributes
+    ----------
+    value : float or None
+        Value of a fixed parameter; None if swept.
+    is_swept : bool
+        Whether the parameter is swept.
+    min, max : float or None
+        Bounds of a swept range; None if fixed or the range is unknown.
+    sweep_direction : SweepDirection
+        Direction of the sweep.
+    unit : str or None
+        Unit as written in the filename, without SI prefix.
+    """
     value: float | None
     is_swept: bool
     min: float | None
@@ -450,10 +620,12 @@ class ParameterState(NamedTuple):
 
     @staticmethod
     def to_float(val) -> float | None:
+        """Convert to float, passing None through."""
         return float(val) if val is not None else None
 
     @classmethod
     def from_state(cls, state: _ParameterState):
+        """Build a snapshot from a `Parameter`'s internal state."""
         return cls(
             value=cls.to_float(state.value),
             is_swept=state.is_swept,
@@ -465,6 +637,7 @@ class ParameterState(NamedTuple):
 
     @property
     def range(self) -> tuple[float, float] | None:
+        """``(start, end)`` in sweep order, or None if not a swept range."""
         if self.is_swept and self.min is not None and self.max is not None:
             # Return (start, end) preserving sweep direction
             if self.sweep_direction == SweepDirection.DECREASING:
@@ -474,6 +647,7 @@ class ParameterState(NamedTuple):
 
     @property
     def sweep(self) -> tuple[float, float, SweepDirection] | None:
+        """``(min, max, direction)`` if swept, else None."""
         if self.is_swept:
             return (self.min, self.max, self.sweep_direction)
         return None

@@ -9,6 +9,26 @@ from medapy.utils.prefixes import SYMBOL_TO_MULTIPLIER, format_with_prefix
 from medapy.utils.warnings import MagnitudeFormatWarning
 
 class PolarizationType(Enum):
+    """
+    Polarization of a contact pair: current ('I') or voltage ('V').
+
+    Lookup accepts the value or a case-insensitive alias: ``'i'``/``'current'``
+    and ``'v'``/``'voltage'``. Members also compare equal to these strings.
+
+    Attributes
+    ----------
+    CURRENT : str
+        Current polarization, ``'I'``.
+    VOLTAGE : str
+        Voltage polarization, ``'V'``.
+
+    Examples
+    --------
+    >>> PolarizationType('current')
+    <PolarizationType.CURRENT: 'I'>
+    >>> PolarizationType.VOLTAGE == 'v'
+    True
+    """
     CURRENT = 'I'
     VOLTAGE = 'V'
 
@@ -359,6 +379,7 @@ class ContactPair:
         raise TypeError(f"Expected int, tuple, str, or ContactPair, got {type(other)}")
 
     def to_tuple(self):
+        """Return ``(first_contact, second_contact, polarization, magnitude)``."""
         return (
             self.first_contact,
             self.second_contact,
@@ -367,9 +388,24 @@ class ContactPair:
         )
 
     def copy(self):
+        """Return a copy of this contact pair."""
         return self.__copy__()
 
     def polarized(self, polarization, magnitude=None):
+        """
+        Return a new pair with the same contacts and the given polarization.
+
+        Parameters
+        ----------
+        polarization : PolarizationType or str
+            New polarization ('I' or 'V').
+        magnitude : Decimal, float, int, or str, optional
+            New magnitude. Not taken from this pair; None if omitted.
+
+        Returns
+        -------
+        ContactPair
+        """
         return type(self)(
             self.first_contact,
             self.second_contact,

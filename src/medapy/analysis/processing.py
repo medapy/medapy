@@ -524,12 +524,62 @@ def symmetric_range(lim, dx=1, *, sp=0, exclude_sp=False) -> np.ndarray:
     return np.concatenate((half2[::-1], half1))
 
 def symmetrize(seq: npt.ArrayLike) -> npt.ArrayLike:
+    """Return the even part of a sequence, ``(seq + seq[::-1]) / 2``.
+
+    The sequence is assumed to be sampled on an x grid symmetric about zero,
+    so that ``seq[::-1]`` holds the values at ``-x``.
+
+    Parameters
+    ----------
+    seq : array-like
+        Finite values to symmetrize.
+
+    Returns
+    -------
+    np.ndarray
+        Symmetrized values, same length as `seq`.
+
+    Raises
+    ------
+    ValueError
+        If `seq` is empty or contains NaN/Inf.
+
+    See Also
+    --------
+    antisymmetrize : Odd part of a sequence
+    symmetric_range : Build a symmetric x grid
+    """
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     seq = np.asarray_chkfinite(seq)
     return (seq + seq[::-1]) / 2
 
 def antisymmetrize(seq: npt.ArrayLike) -> npt.ArrayLike:
+    """Return the odd part of a sequence, ``(seq - seq[::-1]) / 2``.
+
+    The sequence is assumed to be sampled on an x grid symmetric about zero,
+    so that ``seq[::-1]`` holds the values at ``-x``.
+
+    Parameters
+    ----------
+    seq : array-like
+        Finite values to antisymmetrize.
+
+    Returns
+    -------
+    np.ndarray
+        Antisymmetrized values, same length as `seq`.
+
+    Raises
+    ------
+    ValueError
+        If `seq` is empty or contains NaN/Inf.
+
+    See Also
+    --------
+    symmetrize : Even part of a sequence
+    symmetric_range : Build a symmetric x grid
+    """
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     seq = np.asarray_chkfinite(seq)
@@ -984,13 +1034,14 @@ def quick_fit(
     No normalization is performed by design.
 
     Args:
-        x, y: array-like input data
+        x: array-like input x data
+        y: array-like input y data
         degrees: int or sequence of numbers, default=1
             If int, fits standard polynomial up to this degree (0 to degrees)
             If sequence, uses these exact degrees (can be negative for rational terms)
         x_range: sequence of [min, max], optional
             Fit using only x values within this range inclusive
-        handle_na : str, default 'raise'
+        handle_na: str, default 'raise'
             How to handle NaN/inf values: 'exclude' or 'raise'
 
     Returns:
@@ -1197,26 +1248,110 @@ def evaluate_std(x: npt.ArrayLike, y: npt.ArrayLike,
 
 ## Secondary functions
 def get_mid_ind(seq: npt.ArrayLike)-> int:
+    """Return the index of the middle element, ``len(seq) // 2``.
+
+    For an even length this is the upper of the two middle indices.
+
+    Raises
+    ------
+    ValueError
+        If `seq` is empty.
+    """
     if len(seq) == 0:  # Handle empty sequence
         raise ValueError("Sequence cannot be empty")
     return len(seq) // 2  # Use floor division
 
 def get_mid_elem(seq: npt.ArrayLike) -> Any:
+    """Return the middle element, ``seq[len(seq) // 2]``.
+
+    For an even length this is the upper of the two middle elements.
+
+    Raises
+    ------
+    ValueError
+        If `seq` is empty.
+    """
     if len(seq) == 0:
         raise ValueError("Sequence cannot be empty")
     return seq[len(seq) // 2]
 
 def sym_points(sequence, *, split_point=0, atol=1e-8):
+    """Return the points that have a mirror partner across `split_point`.
+
+    Parameters
+    ----------
+    sequence : array-like
+        Values sorted in increasing order.
+    split_point : float, default 0
+        Point to mirror about.
+    atol : float, default 1e-8
+        Absolute tolerance when comparing distances to `split_point`.
+
+    Returns
+    -------
+    np.ndarray
+        Points of `sequence` (as float) whose mirror image is also present.
+
+    See Also
+    --------
+    find_sym_points_indices : Indices of these points
+    nonsym_points : The complementary points
+    """
     indices = find_sym_points_indices(sequence, split_point, atol)
     seq = np.array(sequence, dtype=float)
     return seq[indices]
 
 def nonsym_points(sequence, *, split_point=0, atol=1e-8):
+    """Return the points that have no mirror partner across `split_point`.
+
+    Parameters
+    ----------
+    sequence : array-like
+        Values sorted in increasing order.
+    split_point : float, default 0
+        Point to mirror about.
+    atol : float, default 1e-8
+        Absolute tolerance when comparing distances to `split_point`.
+
+    Returns
+    -------
+    np.ndarray
+        Points of `sequence` (as float) whose mirror image is absent.
+
+    See Also
+    --------
+    sym_points : The complementary points
+    """
     indices = ~find_sym_points_indices(sequence, split_point, atol)
     seq = np.array(sequence, dtype=float)
     return seq[indices]
 
 def find_sym_points_indices(sequence, split_point=0, atol=1e-8):
+    """Find indices of points that have a mirror partner across `split_point`.
+
+    A point ``x`` below `split_point` and a point ``y`` at or above it form a
+    pair when ``|x - split_point|`` and ``|y - split_point|`` agree within
+    `atol`. Each point below `split_point` is paired with at most one partner.
+
+    Parameters
+    ----------
+    sequence : array-like
+        Finite values sorted in increasing order.
+    split_point : float, default 0
+        Point to mirror about.
+    atol : float, default 1e-8
+        Absolute tolerance when comparing distances to `split_point`.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted integer indices of both members of every pair.
+
+    Examples
+    --------
+    >>> find_sym_points_indices([-2, -1, 0, 1, 2, 3])
+    array([0, 1, 3, 4])
+    """
     seq = np.asarray_chkfinite(sequence, dtype=float)
     split_idx = np.searchsorted(seq, split_point)
 

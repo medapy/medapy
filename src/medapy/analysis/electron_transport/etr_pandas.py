@@ -651,6 +651,46 @@ class ElectricalTransportAccessor(DataProcessingAccessor):
                           add_labels: str | list[str] | None = None,
                           inplace: bool = False
                           ) -> pd.DataFrame | None:
+        """
+        Evaluate the two-band model with known parameters.
+
+        Parameters
+        ----------
+        p : tuple of 4 floats
+            Parameters as (n1, n2, mu1, mu2) in SI units
+            (densities in m^-3, mobilities in m^2/(V·s)).
+        cols : str or list of str, optional
+            Column(s) whose names and units the calculated columns are derived from.
+            If None, uses the y-axis column.
+        kinds : str or list of str
+            Model to evaluate for each column: 'xx' or 'xy'.
+        bands : str
+            Two-letter band configuration: 'he', 'eh', 'hh' or 'ee'.
+        append : str, default '2bnd'
+            Suffix for the new columns.
+        set_axes : str or list of str, optional
+            Axis assignment for the new columns.
+        add_labels : str or list of str, optional
+            Label(s) for the new columns.
+        inplace : bool, default False
+            If True, modify DataFrame in place.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Modified DataFrame if inplace=False, None otherwise.
+
+        Examples
+        --------
+        >>> p = [2.5e25, 4.8e24, 0.011, 0.019]  # n1, n2, mu1, mu2
+        >>> df.etr.calculate_twoband(p, cols=['rho_xy', 'rho_xx'],
+        ...                          kinds=['xy', 'xx'], bands='he', inplace=True)
+
+        See Also
+        --------
+        fit_twoband : Fit the two-band model to measured data
+        calculate_multiband : Same for any number of bands (interleaved parameters)
+        """
         # Default to y axis column if None provided
         cols = self._prepare_values_list(cols, default=self.col_y, func=self.ms.get_column)
         n_cols = len(cols)

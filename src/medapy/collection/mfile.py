@@ -241,7 +241,8 @@ class MeasurementFile:
         else:
             raise ValueError(f"mode must be 'all' or 'any', got '{mode}'")
 
-    def check_polarization(self, polarization: str):
+    def check_polarization(self, polarization: str) -> bool:
+        """Check if any contact pair has the given polarization ('I' or 'V')."""
         return any(pair.polarization == polarization for pair in self.contact_pairs)
 
     def check_name(self, strings: list[str] | str) -> bool:
@@ -272,7 +273,28 @@ class MeasurementFile:
 
     def check_sweeps(
         self, sweeps: list[str] | str, directions: list[str | None] | str | None = None
-    ):
+    ) -> bool:
+        """
+        Check that all given parameters are swept, optionally in given directions.
+
+        Parameters
+        ----------
+        sweeps : str or list of str
+            Parameter name(s) that must be swept.
+        directions : str, None, or list of these, optional
+            Expected sweep direction for each name in `sweeps` ('inc', 'dec', ...);
+            None means any direction. Missing trailing entries count as None.
+
+        Returns
+        -------
+        bool
+            True if every check passes.
+
+        Raises
+        ------
+        ValueError
+            If more directions than sweeps are given.
+        """
         if not isinstance(sweeps, (list, tuple)):
             sweeps = [sweeps]
         if not isinstance(directions, (list, tuple)):
@@ -286,7 +308,22 @@ class MeasurementFile:
 
         return all(self.check_sweep(*sweep) for sweep in sweeps_and_dirs)
 
-    def check_sweep(self, sweep: str | None, direction: str | None = None):
+    def check_sweep(self, sweep: str | None, direction: str | None = None) -> bool:
+        """
+        Check that a parameter is swept, optionally in a given direction.
+
+        Parameters
+        ----------
+        sweep : str
+            Parameter name.
+        direction : str or SweepDirection, optional
+            Expected sweep direction ('inc', 'dec', ...). If None, any direction.
+
+        Returns
+        -------
+        bool
+            False if the parameter is undefined, fixed, or swept the other way.
+        """
         param = self.parameters.get(sweep)
         if not param:
             return False
@@ -435,6 +472,14 @@ class MeasurementFile:
             return param.state.min_val >= min_val and param.state.max_val <= max_val
 
     def get_parameter(self, name: str) -> Parameter:
+        """
+        Return the `Parameter` object for a parameter name.
+
+        Raises
+        ------
+        ValueError
+            If the parameter is not defined for this file.
+        """
         param = self.parameters.get(name)
         if not param:
             raise ValueError(
@@ -475,6 +520,24 @@ class MeasurementFile:
         param.set_swept(min_val, max_val)
 
     def state_of(self, name: str) -> ParameterState:
+        """
+        Return a read-only snapshot of a parameter's state.
+
+        Parameters
+        ----------
+        name : str
+            Parameter name.
+
+        Returns
+        -------
+        ParameterState
+            Value, sweep flag, range, direction and unit, with numbers as floats.
+
+        Raises
+        ------
+        ValueError
+            If the parameter is not defined for this file.
+        """
         param = self.get_parameter(name)
         return ParameterState.from_state(param.state)
 
@@ -820,6 +883,28 @@ class MeasurementFile:
         sep: str | None = None,
         ext: str | None = None,
     ) -> None:
+        """
+        Change the stored path. The file on disk is not touched.
+
+        Parameters
+        ----------
+        directory : str or Path, optional
+            New parent directory. If None, keeps the current one.
+        name : str or Path, optional
+            New filename stem. If None, keeps the current stem.
+        prefix : str, optional
+            Prepended to the stem, joined with the separator.
+        postfix : str, optional
+            Appended to the stem, joined with the separator.
+        sep : str, optional
+            New separator for this file.
+        ext : str, optional
+            New file extension. If None, keeps the current one.
+
+        See Also
+        --------
+        generate_filename : Build a filename from the parsed state
+        """
         # Change separator
         if sep:
             self.separator = sep
@@ -870,6 +955,7 @@ class MeasurementFile:
         return directory / f"{name}{ext}"
 
     def copy(self):
+        """Return a copy with its own contact pairs and parameter states."""
         return self.__copy__()
 
     def __copy__(self):
