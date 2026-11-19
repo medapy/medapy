@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A Python package to work with measured data"
 dependencies = [
   "numpy>=2.2",
-  "pandas>=2.2",
+  "pandas>=2.2,<4",
   "pint>=0.24",
   "pint-pandas>=0.7",
 ]
@@ -25,12 +25,12 @@ fit = [
 plot = [
   "matplotlib>=3.10",
 ]
-test = [
-  "pytest>=8.0",
-]
 all = ["medapy[fit, plot]"]
 
 [dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
 docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.7",
@@ -39,6 +39,10 @@ docs = [
 ]
 
 [tool.setuptools_scm]
+
+[tool.uv]
+# Rebuild the editable install when the git version changes (setuptools-scm)
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.setuptools.packages.find]
 where = ["src"]

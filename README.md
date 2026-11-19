@@ -50,6 +50,15 @@ Importing `ms_pandas` and `proc_pandas` registers the `.ms` and `.proc` accessor
 - [API reference](https://medapy.github.io/medapy/reference/)
 - [`examples/`](https://github.com/medapy/medapy/tree/master/examples): the runnable scripts the tutorials are built from, with sample data.
 
+## Development
+
+MeDaPy uses [uv](https://docs.astral.sh/uv/). From a clone:
+
+```bash
+uv sync --all-extras    # editable install with all extras and the dev tools
+uv run pytest
+```
+
 ## License
 
 MIT, see [LICENSE](https://github.com/medapy/medapy/blob/master/LICENSE).
