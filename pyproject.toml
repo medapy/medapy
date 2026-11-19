@@ -30,6 +30,14 @@ test = [
 ]
 all = ["medapy[fit, plot]"]
 
+[dependency-groups]
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.7",
+  "mkdocstrings[python]>=1.0",
+  "pymdown-extensions>=10.20",
+]
+
 [tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
