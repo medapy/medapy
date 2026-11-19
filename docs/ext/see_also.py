@@ -8,15 +8,15 @@ cross-reference, so the docstrings in ``src/`` stay plain numpydoc.
 Names are resolved like Python names in the docstring's scope: members of the
 object itself (for classes and modules), then of each enclosing object, then as
 an absolute path, then as a unique public name anywhere in the package. Names
-under another top-level package (``pandas.concat``) are rendered as plain code;
-any other unresolved name is logged as a warning, which fails ``mkdocs build
---strict``.
+under the standard library or a known dependency (``pandas.concat``) are
+rendered as plain code; any other unresolved name is logged as a warning, which
+fails ``mkdocs build --strict``.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
+import sys
 from collections import defaultdict
 from typing import Any
 
@@ -27,6 +27,12 @@ logger = griffe.get_logger(__name__)
 _HEADER = re.compile(r"^see also$", re.IGNORECASE)
 _DASHES = re.compile(r"^-{3,}\s*$")
 _ENTRY = re.compile(r"^(?P<names>[^\s:][^:]*?)(?:\s*:\s*(?P<desc>.*))?$")
+
+# Listed rather than looked up with importlib: the docs build runs without
+# medapy's dependencies installed
+_EXTERNAL = frozenset(sys.stdlib_module_names) | {
+    "numpy", "pandas", "pint", "pint_pandas", "scipy", "lmfit", "numdifftools", "matplotlib",
+}
 
 
 class SeeAlsoLinks(griffe.Extension):
@@ -95,7 +101,7 @@ def _link(name: str, obj: griffe.Object, loader: griffe.GriffeLoader, index) -> 
     if target is not None:
         return f"[`{name}`][{target}]"
     top = name.split(".", 1)[0]
-    if top != obj.package.name and importlib.util.find_spec(top) is not None:
+    if top in _EXTERNAL:
         return f"`{name}`"
     logger.warning("%s: cannot resolve See Also entry %r", obj.path, name)
     return f"`{name}`"
