@@ -262,27 +262,9 @@ This comprehensive example demonstrates a complete analysis workflow: loading da
 
 ---
 
-## Common Patterns
+## Next steps
 
-### Unit Registry
-
-Always use the package's global unit registry:
-```python
-from medapy import ureg
-```
-
-### Inplace Operations
-
-Most methods support `inplace` parameter (mimicking pandas):
-```python
-df.etr.normalize(inplace=True)   # Modifies df
-df2 = df.etr.normalize(inplace=False)  # Returns new DataFrame
-```
-
-### File Organization
-
-Use `pathlib.Path` for cross-platform compatibility:
-```python
-from pathlib import Path
-data_dir = Path(__file__).parent / 'data'
-```
+- [How-to guides](how-to/index.md): short recipes for specific tasks, such as selecting files,
+  symmetrizing a sweep or constraining a multiband fit.
+- [Explanation](explanation.md): how sheets keep their state, how units work, and how
+  filenames are parsed.

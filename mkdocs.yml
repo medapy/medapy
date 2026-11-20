@@ -58,6 +58,12 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Tutorials: tutorials.md
+  - How-to guides:
+      - how-to/index.md
+      - Organize data files: how-to/files.md
+      - Measurement sheets: how-to/sheets.md
+      - Process data: how-to/processing.md
+      - Fit data: how-to/fitting.md
   - Explanation: explanation.md
   - Reference:
       - reference/index.md

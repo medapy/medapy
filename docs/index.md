@@ -32,5 +32,6 @@ The printed sheet shows each column's unit (`U`), axis (`A`) and labels (`L`) ab
 ## Where to go next
 
 - [Tutorials](tutorials.md): a guided path through five example scripts, from measurement-sheet basics to a complete fit-and-save workflow.
+- [How-to guides](how-to/index.md): short, independent recipes for organizing files, working with sheets, processing and fitting.
 - [Explanation](explanation.md): how measurement sheets keep their state, how units work, and how filenames are parsed into parameters.
 - [Reference](reference/index.md): the API, generated from the docstrings.
